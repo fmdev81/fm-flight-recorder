@@ -150,6 +150,8 @@ struct Shared {
     waiting: AtomicBool,
     level: AtomicU8,
     beats: AtomicU64,
+    /// Heartbeats that came from kFMXT_Idle (not from the run loop).
+    idle_msgs: AtomicU64,
     freezes: AtomicU64,
     running: AtomicBool,
     /// Set by the watchdog after a freeze: capture context at the next safe idle.
@@ -193,6 +195,7 @@ impl Clock {
 pub struct Status {
     pub running: bool,
     pub heartbeats: u64,
+    pub idle_messages: u64,
     pub freezes: u64,
     pub threshold_ms: u64,
     pub in_freeze_ms: u64,
@@ -218,6 +221,7 @@ impl Recorder {
             waiting: AtomicBool::new(false),
             level: AtomicU8::new(Level::UserNotIdle as u8),
             beats: AtomicU64::new(0),
+            idle_msgs: AtomicU64::new(0),
             freezes: AtomicU64::new(0),
             running: AtomicBool::new(true),
             want_context: AtomicBool::new(true),
@@ -324,6 +328,7 @@ impl Recorder {
         self.shared.last_beat_ns.store(mono_ns(), Release);
         if level != Level::RunLoop {
             self.shared.level.store(level as u8, Relaxed);
+            self.shared.idle_msgs.fetch_add(1, Relaxed);
         }
         self.shared.beats.fetch_add(1, Relaxed);
     }
@@ -393,6 +398,7 @@ impl Recorder {
         Status {
             running: self.shared.running.load(Relaxed),
             heartbeats: self.shared.beats.load(Relaxed),
+            idle_messages: self.shared.idle_msgs.load(Relaxed),
             freezes: self.shared.freezes.load(Relaxed),
             threshold_ms: self.cfg.threshold_ms,
             in_freeze_ms: if since == 0 {
@@ -441,6 +447,7 @@ impl Recorder {
             ts: self.clock.iso(mono_ns()),
             freezes: self.shared.freezes.load(Relaxed),
             heartbeats: self.shared.beats.load(Relaxed),
+            idle_messages: self.shared.idle_msgs.load(Relaxed),
         });
         // The watchdog holds a Sender clone; it exits on `running == false`.
         *self.tx.lock().unwrap() = None;

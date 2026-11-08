@@ -220,6 +220,7 @@ fn main() {
         ts: iso_from_unix_ms(end),
         freezes,
         heartbeats: (hours * 3600.0 * 40.0) as u64,
+        idle_messages: (hours * 3600.0 * 10.0) as u64,
     });
 
     let text: String = lines.iter().map(|e| to_line(e) + "\n").collect();

@@ -61,6 +61,9 @@ pub enum Event {
         ts: String,
         freezes: u64,
         heartbeats: u64,
+        /// Of which kFMXT_Idle messages.
+        #[serde(default)]
+        idle_messages: u64,
     },
 }
 
@@ -219,6 +222,7 @@ mod tests {
             ts: iso_now(),
             freezes: 2,
             heartbeats: 10,
+            idle_messages: 4,
         };
         let p = w.write(&e).unwrap();
         w.write(&e).unwrap();

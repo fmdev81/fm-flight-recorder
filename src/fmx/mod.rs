@@ -10,6 +10,7 @@
 //! * No panic crosses the C boundary: every entry is wrapped in catch_unwind.
 
 mod ffi;
+mod selftest;
 
 use crate::context::{self, Context, ContextSource, Field};
 use crate::fmxabi::*;
@@ -278,6 +279,9 @@ fn on_idle(pb: &ExternCallStruct) {
             rec.offer_context(ctx);
         }
     }
+    if pb.unsafe_calls == 0 && level.safe_for_calls(false) && selftest::enabled() {
+        selftest::tick(&rec);
+    }
 }
 
 /// The plug-in entry point. FileMaker finds it by name in the bundle.
@@ -309,6 +313,19 @@ pub unsafe extern "C" fn FMExternCallProc(pb: *mut ExternCallStruct) {
                 // Record from launch with default options.
                 if std::env::var_os("FLIGHT_RECORDER_NO_AUTOSTART").is_none() {
                     start("");
+                    if let Some(r) = recorder() {
+                        r.mark(
+                            &format!(
+                                "init: extnVersion {} app type {} app '{}' cCurrentEnv {} selftest {}",
+                                { p.extn_version },
+                                p.parm1,
+                                APP_VERSION.lock().unwrap(),
+                                CURRENT_ENV.load(Ordering::Relaxed) != 0,
+                                selftest::enabled()
+                            ),
+                            Context::default(),
+                        );
+                    }
                 }
                 p.result = K_CURRENT_EXTN_VERSION;
             }
