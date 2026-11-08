@@ -88,7 +88,13 @@ unsafe impl Sync for RunLoopObserver {}
 
 impl RunLoopObserver {
     /// Install `handler(activity)` on `rl` (use `CFRunLoopGetMain()`).
-    pub fn install(rl: CFRunLoopRef, handler: impl Fn(u64) + Send + Sync + 'static) -> Option<Self> {
+    ///
+    /// # Safety
+    /// `rl` must be a valid CFRunLoopRef.
+    pub unsafe fn install(
+        rl: CFRunLoopRef,
+        handler: impl Fn(u64) + Send + Sync + 'static,
+    ) -> Option<Self> {
         let handler: *mut Handler = Box::into_raw(Box::new(Box::new(handler)));
         let mut ctx = ObserverContext {
             version: 0,
@@ -99,7 +105,14 @@ impl RunLoopObserver {
         };
         unsafe {
             // order = isize::MIN so BeforeWaiting reaches us early.
-            let obs = CFRunLoopObserverCreate(std::ptr::null(), ALL, 1, isize::MIN, observer_cb, &mut ctx);
+            let obs = CFRunLoopObserverCreate(
+                std::ptr::null(),
+                ALL,
+                1,
+                isize::MIN,
+                observer_cb,
+                &mut ctx,
+            );
             if obs.is_null() {
                 drop(Box::from_raw(handler));
                 return None;
@@ -202,14 +215,16 @@ mod tests {
         // Runs on the test thread's own run loop.
         let seen = Arc::new([AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)]);
         let s2 = seen.clone();
-        let obs = RunLoopObserver::install(unsafe { CFRunLoopGetCurrent() }, move |a| {
-            let i = match a {
-                BEFORE_WAITING => 0,
-                AFTER_WAITING => 1,
-                _ => 2,
-            };
-            s2[i].fetch_add(1, Ordering::Relaxed);
-        })
+        let obs = unsafe {
+            RunLoopObserver::install(CFRunLoopGetCurrent(), move |a| {
+                let i = match a {
+                    BEFORE_WAITING => 0,
+                    AFTER_WAITING => 1,
+                    _ => 2,
+                };
+                s2[i].fetch_add(1, Ordering::Relaxed);
+            })
+        }
         .expect("observer");
         let mut n = 0;
         let _t = Timer::every(0.02, move || {

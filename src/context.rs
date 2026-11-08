@@ -74,9 +74,16 @@ pub trait ContextSource {
 }
 
 /// Read all fields. `now_ms` and the clock are injected for tests.
-pub fn capture(src: &mut dyn ContextSource, now_ms: u64, clock_us: &mut dyn FnMut() -> u64) -> Context {
+pub fn capture(
+    src: &mut dyn ContextSource,
+    now_ms: u64,
+    clock_us: &mut dyn FnMut() -> u64,
+) -> Context {
     let t0 = clock_us();
-    let mut c = Context { captured_ms: now_ms, ..Default::default() };
+    let mut c = Context {
+        captured_ms: now_ms,
+        ..Default::default()
+    };
     for f in ALL_FIELDS {
         let v = src.get(f).unwrap_or_default();
         match f {
@@ -106,7 +113,10 @@ pub struct CaptureGate {
 
 impl CaptureGate {
     pub fn new(interval_ms: u64) -> Self {
-        Self { interval_ms, last_ms: None }
+        Self {
+            interval_ms,
+            last_ms: None,
+        }
     }
     pub fn should_capture(&mut self, now_ms: u64) -> bool {
         match self.last_ms {
@@ -164,7 +174,10 @@ mod tests {
 
     #[test]
     fn empty_fields_are_not_serialized() {
-        let c = Context { layout: "L".into(), ..Default::default() };
+        let c = Context {
+            layout: "L".into(),
+            ..Default::default()
+        };
         let j = serde_json::to_string(&c).unwrap();
         assert!(j.contains("\"layout\":\"L\""));
         assert!(!j.contains("script"));

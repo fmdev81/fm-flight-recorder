@@ -31,7 +31,10 @@ fn main() {
         .into_iter()
         .find(|d| d.join("FMWrapper.framework").exists())
         .expect("FMWrapper.framework not found; set FMWRAPPER_FRAMEWORK_DIR");
-    println!("cargo:warning=linking FMWrapper.framework from {}", dir.display());
+    println!(
+        "cargo:warning=linking FMWrapper.framework from {}",
+        dir.display()
+    );
     println!("cargo:rustc-link-search=framework={}", dir.display());
     // SDK sample uses @loader_path/../Frameworks; the app's own copy is at
     // @executable_path/../Frameworks. Both are harmless.

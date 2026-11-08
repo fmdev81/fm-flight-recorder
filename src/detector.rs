@@ -52,7 +52,11 @@ pub struct StallDetector {
 
 impl StallDetector {
     pub fn new(threshold_ms: u64) -> Self {
-        Self { threshold_ns: threshold_ms.max(1) * 1_000_000, in_stall: None, seen_beat_ns: 0 }
+        Self {
+            threshold_ns: threshold_ms.max(1) * 1_000_000,
+            in_stall: None,
+            seen_beat_ns: 0,
+        }
     }
 
     pub fn threshold_ms(&self) -> u64 {
@@ -79,7 +83,10 @@ impl StallDetector {
                 if new_beat || s.waiting {
                     self.in_stall = None;
                     let end_ns = if new_beat { s.last_beat_ns } else { s.now_ns };
-                    return Some(Transition::Ended { start_ns, end_ns: end_ns.max(start_ns) });
+                    return Some(Transition::Ended {
+                        start_ns,
+                        end_ns: end_ns.max(start_ns),
+                    });
                 }
                 None
             }
@@ -89,7 +96,9 @@ impl StallDetector {
                 }
                 if s.now_ns.saturating_sub(s.last_beat_ns) >= self.threshold_ns {
                     self.in_stall = Some(s.last_beat_ns);
-                    return Some(Transition::Started { start_ns: s.last_beat_ns });
+                    return Some(Transition::Started {
+                        start_ns: s.last_beat_ns,
+                    });
                 }
                 None
             }
@@ -129,13 +138,24 @@ mod tests {
     const MS: u64 = 1_000_000;
 
     fn s(now_ms: u64, beat_ms: u64, waiting: bool) -> Sample {
-        Sample { now_ns: now_ms * MS, last_beat_ns: beat_ms * MS, waiting }
+        Sample {
+            now_ns: now_ms * MS,
+            last_beat_ns: beat_ms * MS,
+            waiting,
+        }
     }
 
     #[test]
     fn no_beat_yet_is_not_a_stall() {
         let mut d = StallDetector::new(250);
-        assert_eq!(d.observe(Sample { now_ns: 10_000 * MS, last_beat_ns: 0, waiting: false }), None);
+        assert_eq!(
+            d.observe(Sample {
+                now_ns: 10_000 * MS,
+                last_beat_ns: 0,
+                waiting: false
+            }),
+            None
+        );
     }
 
     #[test]
@@ -151,11 +171,22 @@ mod tests {
         let mut d = StallDetector::new(250);
         assert_eq!(d.observe(s(1_000, 1_000, false)), None);
         assert_eq!(d.observe(s(1_200, 1_000, false)), None);
-        assert_eq!(d.observe(s(1_250, 1_000, false)), Some(Transition::Started { start_ns: 1_000 * MS }));
+        assert_eq!(
+            d.observe(s(1_250, 1_000, false)),
+            Some(Transition::Started {
+                start_ns: 1_000 * MS
+            })
+        );
         // Still frozen: no second Started.
         assert_eq!(d.observe(s(3_000, 1_000, false)), None);
         let t = d.observe(s(5_210, 5_200, false)).unwrap();
-        assert_eq!(t, Transition::Ended { start_ns: 1_000 * MS, end_ns: 5_200 * MS });
+        assert_eq!(
+            t,
+            Transition::Ended {
+                start_ns: 1_000 * MS,
+                end_ns: 5_200 * MS
+            }
+        );
         assert_eq!(t.duration_ns(), Some(4_200 * MS));
         assert!(d.in_stall().is_none());
     }
@@ -171,10 +202,19 @@ mod tests {
     #[test]
     fn stall_ends_when_run_loop_goes_to_sleep() {
         let mut d = StallDetector::new(100);
-        d.observe(s(0 + 1, 1, false));
-        assert!(matches!(d.observe(s(500, 1, false)), Some(Transition::Started { .. })));
+        d.observe(s(1, 1, false));
+        assert!(matches!(
+            d.observe(s(500, 1, false)),
+            Some(Transition::Started { .. })
+        ));
         let t = d.observe(s(900, 1, true)).unwrap();
-        assert_eq!(t, Transition::Ended { start_ns: MS, end_ns: 900 * MS });
+        assert_eq!(
+            t,
+            Transition::Ended {
+                start_ns: MS,
+                end_ns: 900 * MS
+            }
+        );
     }
 
     #[test]
@@ -182,8 +222,13 @@ mod tests {
         let mut d = StallDetector::new(100);
         d.observe(s(10, 10, false));
         assert!(d.observe(s(200, 10, false)).is_some());
-        assert!(matches!(d.observe(s(400, 390, false)), Some(Transition::Ended { .. })));
-        assert!(matches!(d.observe(s(600, 390, false)), Some(Transition::Started { start_ns }) if start_ns == 390 * MS));
+        assert!(matches!(
+            d.observe(s(400, 390, false)),
+            Some(Transition::Ended { .. })
+        ));
+        assert!(
+            matches!(d.observe(s(600, 390, false)), Some(Transition::Started { start_ns }) if start_ns == 390 * MS)
+        );
     }
 
     #[test]

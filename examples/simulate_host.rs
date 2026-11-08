@@ -85,7 +85,9 @@ fn busy_cpu(ms: u64) {
 }
 
 fn main() {
-    let dir = std::env::args().nth(1).unwrap_or_else(|| "demo-logs".into());
+    let dir = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "demo-logs".into());
     let port = fake_server();
     let cfg = Config {
         threshold_ms: 250,
@@ -96,13 +98,25 @@ fn main() {
         app: "simulate_host".into(),
         ..Default::default()
     };
-    let rec = Arc::new(Recorder::start(cfg, fm_flight_recorder::default_probe(Some(port))));
+    let rec = Arc::new(Recorder::start(
+        cfg,
+        fm_flight_recorder::default_probe(Some(port)),
+    ));
     let r2 = rec.clone();
-    let _obs = RunLoopObserver::install(unsafe { runloop::CFRunLoopGetCurrent() }, move |a| runloop::feed(&r2, a));
+    let _obs = unsafe {
+        RunLoopObserver::install(runloop::CFRunLoopGetCurrent(), move |a| {
+            runloop::feed(&r2, a)
+        })
+    };
 
-    let client = Rc::new(RefCell::new(Client(TcpStream::connect(("127.0.0.1", port)).unwrap())));
+    let client = Rc::new(RefCell::new(Client(
+        TcpStream::connect(("127.0.0.1", port)).unwrap(),
+    )));
     client.borrow().0.set_nodelay(true).unwrap();
-    let here = Rc::new(RefCell::new((ctx("Dashboard", "Dashboard", ""), Level::UserNotIdle)));
+    let here = Rc::new(RefCell::new((
+        ctx("Dashboard", "Dashboard", ""),
+        Level::UserNotIdle,
+    )));
 
     // kFMXT_Idle every 50 ms.
     let (r3, h3) = (rec.clone(), here.clone());
@@ -124,7 +138,10 @@ fn main() {
             1 => {
                 // Portal on a WAN: 30 sequential queries, 25 ms each.
                 println!("step 1: Invoices | Detail portal, 30 round trips at 25 ms");
-                r4.mark("go to Invoices", ctx("Dashboard", "Dashboard", "Go To Invoices"));
+                r4.mark(
+                    "go to Invoices",
+                    ctx("Dashboard", "Dashboard", "Go To Invoices"),
+                );
                 for _ in 0..30 {
                     cl.call(25);
                 }
@@ -142,7 +159,10 @@ fn main() {
             5 => {
                 // OnRecordLoad trigger loop: many quick trips plus CPU.
                 println!("step 5: OnRecordLoad trigger, 60 round trips at 8 ms + CPU");
-                *h4.borrow_mut() = (ctx("Customers | List", "Customers", "OnRecordLoad: Refresh"), Level::ScriptRunning);
+                *h4.borrow_mut() = (
+                    ctx("Customers | List", "Customers", "OnRecordLoad: Refresh"),
+                    Level::ScriptRunning,
+                );
                 for i in 0..60 {
                     cl.call(8);
                     if i % 10 == 0 {
@@ -167,5 +187,8 @@ fn main() {
     runloop::run_for(15.0);
     drop(_obs);
     let st = rec.stop();
-    println!("{} freezes recorded, {} heartbeats -> {}", st.freezes, st.heartbeats, st.log);
+    println!(
+        "{} freezes recorded, {} heartbeats -> {}",
+        st.freezes, st.heartbeats, st.log
+    );
 }

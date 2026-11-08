@@ -123,7 +123,11 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
     for _ in 0..20 {
         rec.beat(Level::UserNotIdle);
         if rec.wants_context(Level::UserNotIdle) {
-            rec.offer_context(Context { file: "Invoices".into(), layout: "Customers".into(), ..Default::default() });
+            rec.offer_context(Context {
+                file: "Invoices".into(),
+                layout: "Customers".into(),
+                ..Default::default()
+            });
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -138,7 +142,11 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
     for _ in 0..10 {
         rec.beat(Level::UserNotIdle);
         if rec.wants_context(Level::UserNotIdle) {
-            rec.offer_context(Context { file: "Invoices".into(), layout: "Invoice Detail".into(), ..Default::default() });
+            rec.offer_context(Context {
+                file: "Invoices".into(),
+                layout: "Invoice Detail".into(),
+                ..Default::default()
+            });
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -146,10 +154,23 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
     assert_eq!(st.freezes, 1, "{st:?}");
 
     let events = read_events(&dir);
-    assert!(matches!(events.first(), Some(Event::SessionStart { .. })), "{events:?}");
-    assert!(matches!(events.last(), Some(Event::SessionStop { freezes: 1, .. })), "{events:?}");
+    assert!(
+        matches!(events.first(), Some(Event::SessionStart { .. })),
+        "{events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(Event::SessionStop { freezes: 1, .. })),
+        "{events:?}"
+    );
     let freeze = events.iter().find_map(|e| match e {
-        Event::Freeze { duration_ms, before, after, net, marks, .. } => Some((*duration_ms, before, after, net, marks)),
+        Event::Freeze {
+            duration_ms,
+            before,
+            after,
+            net,
+            marks,
+            ..
+        } => Some((*duration_ms, before, after, net, marks)),
         _ => None,
     });
     let (dur, before, after, net, marks) = freeze.expect("a freeze event");
@@ -168,7 +189,13 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
 fn idle_gaps_while_run_loop_sleeps_are_not_freezes() {
     let dir = std::env::temp_dir().join(format!("fr-e2e-sleep-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let cfg = Config { threshold_ms: 50, poll_ms: 5, net_port: None, log_dir: dir.clone(), ..Default::default() };
+    let cfg = Config {
+        threshold_ms: 50,
+        poll_ms: 5,
+        net_port: None,
+        log_dir: dir.clone(),
+        ..Default::default()
+    };
     let rec = Recorder::start(cfg, fm_flight_recorder::default_probe(None));
     rec.beat(Level::UserIdle);
     rec.set_waiting(true);
@@ -184,9 +211,18 @@ fn idle_gaps_while_run_loop_sleeps_are_not_freezes() {
 fn long_script_is_logged_as_script_busy() {
     let dir = std::env::temp_dir().join(format!("fr-e2e-busy-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let cfg = Config { threshold_ms: 100, poll_ms: 5, net_port: None, log_dir: dir.clone(), ..Default::default() };
+    let cfg = Config {
+        threshold_ms: 100,
+        poll_ms: 5,
+        net_port: None,
+        log_dir: dir.clone(),
+        ..Default::default()
+    };
     let rec = Recorder::start(cfg, fm_flight_recorder::default_probe(None));
-    rec.offer_context(Context { script: "Nightly Import".into(), ..Default::default() });
+    rec.offer_context(Context {
+        script: "Nightly Import".into(),
+        ..Default::default()
+    });
     // Script running, but FileMaker still sends idle beats: busy, not frozen.
     for _ in 0..30 {
         rec.beat(Level::ScriptRunning);
@@ -200,7 +236,11 @@ fn long_script_is_logged_as_script_busy() {
     assert_eq!(st.freezes, 0);
     let events = read_events(&dir);
     let busy = events.iter().find_map(|e| match e {
-        Event::ScriptBusy { duration_ms, before, .. } => Some((*duration_ms, before.script.clone())),
+        Event::ScriptBusy {
+            duration_ms,
+            before,
+            ..
+        } => Some((*duration_ms, before.script.clone())),
         _ => None,
     });
     let (d, script) = busy.expect("script_busy event");

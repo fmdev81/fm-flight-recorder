@@ -202,6 +202,8 @@ mod tests {
         let mut ids: Vec<_> = FUNCTIONS.iter().map(|f| f.0).collect();
         ids.dedup();
         assert_eq!(ids.len(), FUNCTIONS.len());
-        assert!(FUNCTIONS.iter().all(|f| f.1.starts_with("FlightRecorder_") && f.4 <= f.5));
+        assert!(FUNCTIONS
+            .iter()
+            .all(|f| f.1.starts_with("FlightRecorder_") && f.4 <= f.5));
     }
 }

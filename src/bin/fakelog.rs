@@ -33,19 +33,45 @@ impl Rng {
 
 /// (layout, table, script, typical freeze ms, round trips per second of freeze, weight)
 const HOTSPOTS: &[(&str, &str, &str, u64, f64, u32)] = &[
-    ("Invoices | Detail", "Invoices", "OnRecordLoad: Refresh Totals", 4200, 9.0, 6),
+    (
+        "Invoices | Detail",
+        "Invoices",
+        "OnRecordLoad: Refresh Totals",
+        4200,
+        9.0,
+        6,
+    ),
     ("Customers | List", "Customers", "", 2600, 14.0, 5),
-    ("Dashboard", "Dashboard", "OnLayoutEnter: Build Charts", 6800, 4.5, 3),
+    (
+        "Dashboard",
+        "Dashboard",
+        "OnLayoutEnter: Build Charts",
+        6800,
+        4.5,
+        3,
+    ),
     ("Orders | Detail", "Orders", "Commit Order", 1900, 2.0, 4),
     ("Products | Portal", "Products", "", 1200, 22.0, 4),
-    ("Invoices | List", "Invoices", "Sort By Balance", 3100, 1.5, 2),
+    (
+        "Invoices | List",
+        "Invoices",
+        "Sort By Balance",
+        3100,
+        1.5,
+        2,
+    ),
     ("Settings", "Prefs", "Startup: Load Globals", 900, 11.0, 1),
 ];
 const ACCOUNTS: &[&str] = &["jose", "maria", "front.desk"];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let arg = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
     let seed: u64 = arg("--seed").and_then(|s| s.parse().ok()).unwrap_or(5003);
     let hours: f64 = arg("--hours").and_then(|s| s.parse().ok()).unwrap_or(3.0);
     let out = arg("--out");
@@ -69,7 +95,10 @@ fn main() {
         captured_ms: 0,
         capture_us: 0,
     };
-    let ctx_with_cost = |c: Context, rng: &mut Rng| Context { capture_us: rng.range(18, 90), ..c };
+    let ctx_with_cost = |c: Context, rng: &mut Rng| Context {
+        capture_us: rng.range(18, 90),
+        ..c
+    };
 
     lines.push(Event::SessionStart {
         ts: iso_from_unix_ms(t0),
@@ -102,7 +131,11 @@ fn main() {
             })
             .unwrap();
         let slow = t > vpn.0 && t < vpn.1;
-        let rtt: u32 = if slow { rng.range(70, 120) as u32 } else { rng.range(8, 28) as u32 };
+        let rtt: u32 = if slow {
+            rng.range(70, 120) as u32
+        } else {
+            rng.range(8, 28) as u32
+        };
         let jitter = 0.45 + rng.f() * 1.2;
         let mut dur = (h.3 as f64 * jitter * if slow { 1.8 } else { 1.0 }) as u64;
         dur = dur.max(260);
@@ -116,7 +149,10 @@ fn main() {
                 context: ctx_with_cost(ctx(&prev_layout, table, script), &mut rng),
             });
         }
-        let before = ctx_with_cost(ctx(&prev_layout, "", if rng.f() < 0.5 { script } else { "" }), &mut rng);
+        let before = ctx_with_cost(
+            ctx(&prev_layout, "", if rng.f() < 0.5 { script } else { "" }),
+            &mut rng,
+        );
         let after = ctx_with_cost(ctx(layout, table, ""), &mut rng);
         // Request -> reply time: RTT plus a few ms of server work per call,
         // and now and then a commit that waits on a record lock.
@@ -129,8 +165,16 @@ fn main() {
             ts: iso_from_unix_ms(t),
             end_ts: iso_from_unix_ms(t + dur as i64),
             duration_ms: dur,
-            level: if script.is_empty() { "user_not_idle" } else { "script_running" }.into(),
-            before: Context { script: script.into(), ..before },
+            level: if script.is_empty() {
+                "user_not_idle"
+            } else {
+                "script_running"
+            }
+            .into(),
+            before: Context {
+                script: script.into(),
+                ..before
+            },
             after: Some(after),
             net: NetWindow {
                 round_trips: rts,
@@ -154,7 +198,11 @@ fn main() {
                 ts: iso_from_unix_ms(t + 2_000),
                 end_ts: iso_from_unix_ms(t + 2_000 + d as i64),
                 duration_ms: d,
-                before: ctx("Invoices | List", "Invoices", "Month End: Recalculate Balances"),
+                before: ctx(
+                    "Invoices | List",
+                    "Invoices",
+                    "Month End: Recalculate Balances",
+                ),
                 net: NetWindow {
                     round_trips: d / 40,
                     tx_bytes: d * 30,
@@ -168,7 +216,11 @@ fn main() {
             t += d as i64;
         }
     }
-    lines.push(Event::SessionStop { ts: iso_from_unix_ms(end), freezes, heartbeats: (hours * 3600.0 * 40.0) as u64 });
+    lines.push(Event::SessionStop {
+        ts: iso_from_unix_ms(end),
+        freezes,
+        heartbeats: (hours * 3600.0 * 40.0) as u64,
+    });
 
     let text: String = lines.iter().map(|e| to_line(e) + "\n").collect();
     match out {

@@ -16,6 +16,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // events are short-lived, one per freeze
 pub enum Event {
     SessionStart {
         ts: String,
@@ -71,7 +72,11 @@ struct Line<'a> {
 }
 
 pub fn to_line(e: &Event) -> String {
-    serde_json::to_string(&Line { v: SCHEMA_VERSION, event: e }).expect("event serializes")
+    serde_json::to_string(&Line {
+        v: SCHEMA_VERSION,
+        event: e,
+    })
+    .expect("event serializes")
 }
 
 pub fn parse_line(s: &str) -> Option<Event> {
@@ -83,7 +88,9 @@ pub fn default_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("FLIGHT_RECORDER_LOG_DIR") {
         return PathBuf::from(d);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
     home.join("Library/Logs/FlightRecorder")
 }
 
@@ -119,12 +126,17 @@ impl LogWriter {
 
 /// Wall clock as ISO-8601 UTC with ms, e.g. 2026-11-08T14:03:07.215Z.
 pub fn iso_now() -> String {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     iso_from_unix_ms(d.as_millis() as i64)
 }
 
 pub fn unix_ms_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 pub fn iso_from_unix_ms(ms: i64) -> String {
@@ -162,8 +174,14 @@ mod tests {
     #[test]
     fn iso_dates() {
         assert_eq!(iso_from_unix_ms(0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_from_unix_ms(1_762_610_587_215), "2025-11-08T14:03:07.215Z");
-        assert_eq!(iso_from_unix_ms(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        assert_eq!(
+            iso_from_unix_ms(1_762_610_587_215),
+            "2025-11-08T14:03:07.215Z"
+        );
+        assert_eq!(
+            iso_from_unix_ms(951_782_400_000),
+            "2000-02-29T00:00:00.000Z"
+        );
     }
 
     #[test]
@@ -173,9 +191,17 @@ mod tests {
             end_ts: "2026-11-08T14:03:11.415Z".into(),
             duration_ms: 4200,
             level: "user_not_idle".into(),
-            before: Context { layout: "Invoices".into(), script: "OnRecordLoad".into(), ..Default::default() },
+            before: Context {
+                layout: "Invoices".into(),
+                script: "OnRecordLoad".into(),
+                ..Default::default()
+            },
             after: None,
-            net: NetWindow { round_trips: 38, connected: true, ..Default::default() },
+            net: NetWindow {
+                round_trips: 38,
+                connected: true,
+                ..Default::default()
+            },
             marks: vec!["load invoice".into()],
         };
         let line = to_line(&e);
@@ -189,12 +215,20 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("fr-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let w = LogWriter::new(&dir);
-        let e = Event::SessionStop { ts: iso_now(), freezes: 2, heartbeats: 10 };
+        let e = Event::SessionStop {
+            ts: iso_now(),
+            freezes: 2,
+            heartbeats: 10,
+        };
         let p = w.write(&e).unwrap();
         w.write(&e).unwrap();
         let text = fs::read_to_string(&p).unwrap();
         assert_eq!(text.lines().count(), 2);
-        assert!(p.file_name().unwrap().to_string_lossy().starts_with("flight-"));
+        assert!(p
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("flight-"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -100,7 +100,11 @@ impl ContextSource for EnvSource {
         unsafe {
             let d = FM_Data_Constructor1(&mut x);
             let err = FM_ExprEnv_EvaluateGetFunction(self.0, f as i16, d, &mut x);
-            let s = if err == 0 && x.m_code == 0 { Some(text_to_string(FM_Data_GetAsText(d, &mut x))) } else { None };
+            let s = if err == 0 && x.m_code == 0 {
+                Some(text_to_string(FM_Data_GetAsText(d, &mut x)))
+            } else {
+                None
+            };
             FM_Data_Delete(d, &mut x);
             s
         }
@@ -123,14 +127,19 @@ fn capture_current() -> Option<Context> {
     if f == 0 {
         return None;
     }
-    let set_env: unsafe extern "C" fn(*mut core::ffi::c_void) -> i16 = unsafe { std::mem::transmute(f) };
+    let set_env: unsafe extern "C" fn(*mut core::ffi::c_void) -> i16 =
+        unsafe { std::mem::transmute(f) };
     let mut x = Fmxcpt::new();
     unsafe {
         let env = FM_ExprEnv_Constructor1(&mut x);
         if env.is_null() {
             return None;
         }
-        let ctx = if set_env(env) == 0 { Some(capture_with(env)) } else { None };
+        let ctx = if set_env(env) == 0 {
+            Some(capture_with(env))
+        } else {
+            None
+        };
         FM_ExprEnv_Delete(env, &mut x);
         ctx
     }
@@ -148,20 +157,30 @@ fn start(options: &str) -> String {
     cfg.apply_options(options);
     cfg.app = APP_VERSION.lock().unwrap().clone();
     cfg.heartbeat = "idle+runloop".into();
-    let rec = Arc::new(Recorder::start(cfg.clone(), crate::default_probe(cfg.net_port)));
+    let rec = Arc::new(Recorder::start(
+        cfg.clone(),
+        crate::default_probe(cfg.net_port),
+    ));
     let r2 = rec.clone();
     // We are on the main thread (Init or an external function call).
-    let observer = RunLoopObserver::install(unsafe { runloop::CFRunLoopGetMain() }, move |a| runloop::feed(&r2, a));
+    let observer = unsafe {
+        RunLoopObserver::install(runloop::CFRunLoopGetMain(), move |a| runloop::feed(&r2, a))
+    };
     let path = rec.log_path().display().to_string();
     *st = Some(State { rec, observer });
     path
 }
 
 fn stop() -> String {
-    let Some(old) = STATE.lock().unwrap().take() else { return "not running".into() };
+    let Some(old) = STATE.lock().unwrap().take() else {
+        return "not running".into();
+    };
     drop(old.observer);
     let s = old.rec.stop();
-    format!("stopped: {} freezes, {} heartbeats, log {}", s.freezes, s.heartbeats, s.log)
+    format!(
+        "stopped: {} freezes, {} heartbeats, log {}",
+        s.freezes, s.heartbeats, s.log
+    )
 }
 
 fn recorder() -> Option<Arc<Recorder>> {
@@ -170,7 +189,12 @@ fn recorder() -> Option<Arc<Recorder>> {
 
 // ---------- external functions ----------
 
-unsafe extern "C" fn ext_function(id: i16, env: *const ExprEnv, parms: *const DataVect, result: *mut Data) -> i16 {
+unsafe extern "C" fn ext_function(
+    id: i16,
+    env: *const ExprEnv,
+    parms: *const DataVect,
+    result: *mut Data,
+) -> i16 {
     let r = catch_unwind(AssertUnwindSafe(|| {
         let out = match id {
             1 => crate::VERSION.to_string(),
@@ -191,7 +215,9 @@ unsafe extern "C" fn ext_function(id: i16, env: *const ExprEnv, parms: *const Da
                 None => "{\"running\":false}".into(),
             },
             6 => {
-                let ms = param_text(parms, 0).and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
+                let ms = param_text(parms, 0)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .unwrap_or(0.0);
                 let ms = ms.clamp(0.0, 10_000.0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 ms.to_string()
@@ -271,7 +297,10 @@ pub unsafe extern "C" fn FMExternCallProc(pb: *mut ExternCallStruct) {
                     p.result = K_DO_NOT_ENABLE as u64;
                     return;
                 }
-                CURRENT_ENV.store(p.c_current_env.map(|f| f as usize).unwrap_or(0), Ordering::Relaxed);
+                CURRENT_ENV.store(
+                    p.c_current_env.map(|f| f as usize).unwrap_or(0),
+                    Ordering::Relaxed,
+                );
                 *APP_VERSION.lock().unwrap() = read_utf16z(p.parm2 as *const u16);
                 if !register_all() {
                     p.result = K_DO_NOT_ENABLE as u64;

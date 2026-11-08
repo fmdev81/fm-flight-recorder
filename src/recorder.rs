@@ -112,7 +112,9 @@ impl Config {
     /// Unknown keys are ignored. `port=0` disables the round-trip counter.
     pub fn apply_options(&mut self, text: &str) {
         for part in text.split([';', '\n', '\r', ',']) {
-            let Some((k, v)) = part.split_once('=') else { continue };
+            let Some((k, v)) = part.split_once('=') else {
+                continue;
+            };
             let (k, v) = (k.trim().to_ascii_lowercase(), v.trim());
             match k.as_str() {
                 "threshold" | "threshold_ms" => {
@@ -176,7 +178,10 @@ struct Clock {
 }
 impl Clock {
     fn now() -> Self {
-        Self { mono0: mono_ns(), unix_ms0: crate::eventlog::unix_ms_now() }
+        Self {
+            mono0: mono_ns(),
+            unix_ms0: crate::eventlog::unix_ms_now(),
+        }
     }
     fn iso(&self, mono: u64) -> String {
         let delta_ms = (mono as i128 - self.mono0 as i128) / 1_000_000;
@@ -243,7 +248,11 @@ impl Recorder {
 
         // Net sampler.
         if cfg.net_port.is_some() {
-            let (s, net, every) = (shared.clone(), net.clone(), Duration::from_millis(cfg.net_sample_ms));
+            let (s, net, every) = (
+                shared.clone(),
+                net.clone(),
+                Duration::from_millis(cfg.net_sample_ms),
+            );
             let mut probe = probe;
             threads.push(
                 thread::Builder::new()
@@ -262,7 +271,13 @@ impl Recorder {
 
         // Watchdog.
         {
-            let (s, inner, net, tx, cfg2) = (shared.clone(), inner.clone(), net.clone(), tx.clone(), cfg.clone());
+            let (s, inner, net, tx, cfg2) = (
+                shared.clone(),
+                inner.clone(),
+                net.clone(),
+                tx.clone(),
+                cfg.clone(),
+            );
             threads.push(
                 thread::Builder::new()
                     .name("fr-watchdog".into())
@@ -282,7 +297,15 @@ impl Recorder {
         });
 
         let writer_dir = cfg.log_dir.clone();
-        Recorder { cfg, shared, inner, tx: Mutex::new(Some(tx)), threads: Mutex::new(threads), clock, writer_dir }
+        Recorder {
+            cfg,
+            shared,
+            inner,
+            tx: Mutex::new(Some(tx)),
+            threads: Mutex::new(threads),
+            clock,
+            writer_dir,
+        }
     }
 
     pub fn config(&self) -> &Config {
@@ -323,7 +346,10 @@ impl Recorder {
             return true;
         }
         let now_ms = mono_ns() / 1_000_000;
-        self.inner.lock().map(|mut i| i.gate.should_capture(now_ms)).unwrap_or(false)
+        self.inner
+            .lock()
+            .map(|mut i| i.gate.should_capture(now_ms))
+            .unwrap_or(false)
     }
 
     /// Hand over a freshly captured context (main thread).
@@ -355,7 +381,11 @@ impl Recorder {
                 i.last_context = ctx.clone();
             }
         }
-        self.send(Event::Mark { ts: self.clock.iso(now), label: label.to_string(), context: ctx });
+        self.send(Event::Mark {
+            ts: self.clock.iso(now),
+            label: label.to_string(),
+            context: ctx,
+        });
     }
 
     pub fn status(&self) -> Status {
@@ -365,9 +395,17 @@ impl Recorder {
             heartbeats: self.shared.beats.load(Relaxed),
             freezes: self.shared.freezes.load(Relaxed),
             threshold_ms: self.cfg.threshold_ms,
-            in_freeze_ms: if since == 0 { 0 } else { (mono_ns() - since) / 1_000_000 },
+            in_freeze_ms: if since == 0 {
+                0
+            } else {
+                (mono_ns() - since) / 1_000_000
+            },
             log: self.log_path().display().to_string(),
-            last_context: self.inner.lock().map(|i| i.last_context.clone()).unwrap_or_default(),
+            last_context: self
+                .inner
+                .lock()
+                .map(|i| i.last_context.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -391,8 +429,11 @@ impl Recorder {
         if !self.shared.running.swap(false, AcqRel) {
             return;
         }
-        let pending: Vec<Event> =
-            self.inner.lock().map(|mut i| i.pending.drain(..).map(|p| p.event).collect()).unwrap_or_default();
+        let pending: Vec<Event> = self
+            .inner
+            .lock()
+            .map(|mut i| i.pending.drain(..).map(|p| p.event).collect())
+            .unwrap_or_default();
         for e in pending {
             self.send(e);
         }
@@ -440,12 +481,19 @@ fn watchdog(
         thread::sleep(poll);
         let now = mono_ns();
         let level = Level::from_u8(s.level.load(Relaxed));
-        let sample = Sample { now_ns: now, last_beat_ns: s.last_beat_ns.load(Acquire), waiting: s.waiting.load(Acquire) };
+        let sample = Sample {
+            now_ns: now,
+            last_beat_ns: s.last_beat_ns.load(Acquire),
+            waiting: s.waiting.load(Acquire),
+        };
 
         match det.observe(sample) {
             Some(Transition::Started { start_ns }) => {
                 level_before_stall = level;
-                ctx_before_stall = inner.lock().map(|i| i.last_context.clone()).unwrap_or_default();
+                ctx_before_stall = inner
+                    .lock()
+                    .map(|i| i.last_context.clone())
+                    .unwrap_or_default();
                 s.stall_since_ns.store(start_ns, Release);
             }
             Some(Transition::Ended { start_ns, end_ns }) => {
@@ -459,7 +507,10 @@ fn watchdog(
                 if wait > 0 {
                     thread::sleep(Duration::from_nanos(wait));
                 }
-                let netw = net.lock().map(|n| n.window(start_ns, end_ns + grace_ns)).unwrap_or_default();
+                let netw = net
+                    .lock()
+                    .map(|n| n.window(start_ns, end_ns + grace_ns))
+                    .unwrap_or_default();
                 let mut i = inner.lock().unwrap();
                 let marks = i
                     .marks
@@ -477,7 +528,10 @@ fn watchdog(
                     net: netw,
                     marks,
                 };
-                i.pending.push(Pending { event: ev, deadline_ns: now + cfg.after_wait_ms * 1_000_000 });
+                i.pending.push(Pending {
+                    event: ev,
+                    deadline_ns: now + cfg.after_wait_ms * 1_000_000,
+                });
                 i.gate.reset();
                 s.want_context.store(true, Release);
             }
@@ -488,7 +542,8 @@ fn watchdog(
         {
             let mut i = inner.lock().unwrap();
             if i.pending.iter().any(|p| p.deadline_ns <= now) {
-                let (late, keep): (Vec<_>, Vec<_>) = i.pending.drain(..).partition(|p| p.deadline_ns <= now);
+                let (late, keep): (Vec<_>, Vec<_>) =
+                    i.pending.drain(..).partition(|p| p.deadline_ns <= now);
                 i.pending = keep;
                 for p in late {
                     let _ = tx.send(p.event);

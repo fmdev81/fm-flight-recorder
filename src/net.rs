@@ -61,9 +61,14 @@ impl TurnCounter {
 
     /// Returns the number of new turns found in this sample (0 or 1).
     pub fn feed_at(&mut self, t_ns: u64, c: NetCounters) -> u64 {
-        let Some(prev) = self.last.replace(c) else { return 0 };
+        let Some(prev) = self.last.replace(c) else {
+            return 0;
+        };
         // A connection went away or was replaced: counters went down. Restart.
-        if c.tx_bytes < prev.tx_bytes || c.rx_bytes < prev.rx_bytes || c.connections != prev.connections {
+        if c.tx_bytes < prev.tx_bytes
+            || c.rx_bytes < prev.rx_bytes
+            || c.connections != prev.connections
+        {
             self.awaiting_since = None;
             return 0;
         }
@@ -122,14 +127,18 @@ pub struct NetHistory {
 
 impl NetHistory {
     pub fn new(keep_secs: u64) -> Self {
-        Self { keep_ns: keep_secs * 1_000_000_000, ..Default::default() }
+        Self {
+            keep_ns: keep_secs * 1_000_000_000,
+            ..Default::default()
+        }
     }
 
     pub fn push(&mut self, t_ns: u64, c: NetCounters) {
         self.counter.feed_at(t_ns, c);
         let changed = self.points.back().map(|p| p.3 != c).unwrap_or(true);
         if changed {
-            self.points.push_back((t_ns, self.counter.turns, self.counter.wait_ns, c));
+            self.points
+                .push_back((t_ns, self.counter.turns, self.counter.wait_ns, c));
         }
         while let Some(&(t0, ..)) = self.points.front() {
             if t_ns.saturating_sub(t0) > self.keep_ns && self.points.len() > 1 {
@@ -232,7 +241,13 @@ mod mac {
     }
 
     extern "C" {
-        fn proc_pidinfo(pid: libc::c_int, flavor: libc::c_int, arg: u64, buffer: *mut libc::c_void, size: libc::c_int) -> libc::c_int;
+        fn proc_pidinfo(
+            pid: libc::c_int,
+            flavor: libc::c_int,
+            arg: u64,
+            buffer: *mut libc::c_void,
+            size: libc::c_int,
+        ) -> libc::c_int;
     }
 
     /// Sockets of *this* process whose remote port is `port`.
@@ -245,7 +260,12 @@ mod mac {
 
     impl TcpPortProbe {
         pub fn new(port: u16) -> Self {
-            Self { port, fds: Vec::new(), last_scan: None, rescan: Duration::from_secs(2) }
+            Self {
+                port,
+                fds: Vec::new(),
+                last_scan: None,
+                rescan: Duration::from_secs(2),
+            }
         }
 
         pub fn port(&self) -> u16 {
@@ -258,7 +278,13 @@ mod mac {
             let pid = unsafe { libc::getpid() };
             let mut buf = vec![ProcFdInfo::default(); 1024];
             let bytes = unsafe {
-                proc_pidinfo(pid, PROC_PIDLISTFDS, 0, buf.as_mut_ptr().cast(), (buf.len() * 8) as libc::c_int)
+                proc_pidinfo(
+                    pid,
+                    PROC_PIDLISTFDS,
+                    0,
+                    buf.as_mut_ptr().cast(),
+                    (buf.len() * 8) as libc::c_int,
+                )
             };
             self.last_scan = Some(Instant::now());
             if bytes <= 0 {
@@ -266,7 +292,8 @@ mod mac {
             }
             let n = bytes as usize / std::mem::size_of::<ProcFdInfo>();
             for fi in &buf[..n.min(buf.len())] {
-                if fi.proc_fdtype == PROX_FDTYPE_SOCKET && peer_port(fi.proc_fd) == Some(self.port) {
+                if fi.proc_fdtype == PROX_FDTYPE_SOCKET && peer_port(fi.proc_fd) == Some(self.port)
+                {
                     self.fds.push(fi.proc_fd);
                 }
             }
@@ -277,14 +304,21 @@ mod mac {
         unsafe {
             let mut ty: libc::c_int = 0;
             let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
-            if libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_TYPE, (&mut ty as *mut libc::c_int).cast(), &mut len) != 0
+            if libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_TYPE,
+                (&mut ty as *mut libc::c_int).cast(),
+                &mut len,
+            ) != 0
                 || ty != libc::SOCK_STREAM
             {
                 return None;
             }
             let mut ss: libc::sockaddr_storage = std::mem::zeroed();
             let mut sl = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-            if libc::getpeername(fd, (&mut ss as *mut libc::sockaddr_storage).cast(), &mut sl) != 0 {
+            if libc::getpeername(fd, (&mut ss as *mut libc::sockaddr_storage).cast(), &mut sl) != 0
+            {
                 return None;
             }
             match ss.ss_family as libc::c_int {
@@ -305,7 +339,13 @@ mod mac {
         let mut info = TcpConnectionInfo::default();
         let mut len = std::mem::size_of::<TcpConnectionInfo>() as libc::socklen_t;
         let r = unsafe {
-            libc::getsockopt(fd, libc::IPPROTO_TCP, TCP_CONNECTION_INFO, (&mut info as *mut TcpConnectionInfo).cast(), &mut len)
+            libc::getsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                TCP_CONNECTION_INFO,
+                (&mut info as *mut TcpConnectionInfo).cast(),
+                &mut len,
+            )
         };
         (r == 0).then_some(info)
     }
@@ -314,7 +354,11 @@ mod mac {
         fn sample(&mut self) -> Option<NetCounters> {
             // Re-scan every 2 s, or every 200 ms while no connection is known
             // (the user may open a hosted file after the recorder starts).
-            let every = if self.fds.is_empty() { Duration::from_millis(200) } else { self.rescan };
+            let every = if self.fds.is_empty() {
+                Duration::from_millis(200)
+            } else {
+                self.rescan
+            };
             let stale = self.last_scan.map(|t| t.elapsed() >= every).unwrap_or(true);
             if stale {
                 self.scan();
@@ -352,7 +396,12 @@ mod tests {
     use super::*;
 
     fn c(tx: u64, rx: u64) -> NetCounters {
-        NetCounters { tx_bytes: tx, rx_bytes: rx, connections: 1, ..Default::default() }
+        NetCounters {
+            tx_bytes: tx,
+            rx_bytes: rx,
+            connections: 1,
+            ..Default::default()
+        }
     }
 
     #[test]
