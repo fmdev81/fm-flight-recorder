@@ -156,6 +156,32 @@ The recorder **starts on its own** when FileMaker launches, with the default opt
 - To turn that off: `launchctl setenv FLIGHT_RECORDER_NO_AUTOSTART 1`, then restart FileMaker.
 - To uninstall: quit FileMaker and delete the `.fmplugin` from the Extensions folder.
 
+### One-command load test (self-test mode)
+
+```sh
+scripts/selftest-in-filemaker.sh /tmp/fr-selftest
+```
+
+The script needs FileMaker Pro to be closed. It does the following:
+
+1. Installs the plug-in.
+2. Copies FileMaker's own *Tasks* template to `/tmp/fr-selftest/FRSelfTest.fmp12`. It never
+   opens your files.
+3. Starts FileMaker with `FLIGHT_RECORDER_SELFTEST=1` and opens the copy. In this mode the
+   plug-in evaluates calculations through FileMaker's calc engine at idle and logs the results
+   as `mark` lines:
+   - `FlightRecorder_Version`
+   - `Get(...)` values
+   - `FlightRecorder_Status`
+   - `FlightRecorder_SimulateFreeze(1500)`
+   - a `While()` loop
+   - `FlightRecorder_Mark`
+4. On the **first run only**, FileMaker stops at startup with its signing alert. The script
+   waits while you tick *Always load this plug-in* and click *Load Plug-in*.
+5. Prints the log lines and quits FileMaker.
+
+Without the environment variable, self-test mode is off.
+
 If FileMaker does not list the plug-in, check:
 - `codesign -v --strict` on the installed bundle
 - for duplicates in `~/Library/Application Support/FileMaker/FileMaker Pro/26.0/Extensions/`
