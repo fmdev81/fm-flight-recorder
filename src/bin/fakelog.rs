@@ -50,7 +50,7 @@ fn main() {
     let hours: f64 = arg("--hours").and_then(|s| s.parse().ok()).unwrap_or(3.0);
     let out = arg("--out");
 
-    let mut rng = Rng(seed.max(1) * 0x9E37_79B9_7F4A_7C15);
+    let mut rng = Rng(seed.max(1).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     // Session starts at 09:00 UTC on a fixed day so the demo is stable.
     let t0: i64 = 1_793_955_600_000; // 2026-11-06T09:00:00Z
     let end = t0 + (hours * 3_600_000.0) as i64;
@@ -69,7 +69,7 @@ fn main() {
         captured_ms: 0,
         capture_us: 0,
     };
-    let mut ctx_with_cost = |c: Context, rng: &mut Rng| Context { capture_us: rng.range(18, 90), ..c };
+    let ctx_with_cost = |c: Context, rng: &mut Rng| Context { capture_us: rng.range(18, 90), ..c };
 
     lines.push(Event::SessionStart {
         ts: iso_from_unix_ms(t0),

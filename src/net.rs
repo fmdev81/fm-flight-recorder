@@ -58,16 +58,24 @@ impl TurnCounter {
         }
         let sent = c.tx_bytes > prev.tx_bytes;
         let got = c.rx_bytes > prev.rx_bytes;
-        let mut new = 0;
-        if got && (self.awaiting_reply || sent) {
-            // Reply to an earlier request, or request+reply in the same tick.
-            new = 1;
-            self.awaiting_reply = false;
-        }
-        if sent && !got {
-            // Data sent in this tick and not answered in it starts a new wait.
-            self.awaiting_reply = true;
-        }
+        let new = match (sent, got) {
+            // Reply to an earlier request, and the next request, in one tick.
+            (true, true) if self.awaiting_reply => 1, // still awaiting the new one
+            // Request and its reply in one tick.
+            (true, true) => {
+                self.awaiting_reply = false;
+                1
+            }
+            (false, true) if self.awaiting_reply => {
+                self.awaiting_reply = false;
+                1
+            }
+            (true, false) => {
+                self.awaiting_reply = true;
+                0
+            }
+            _ => 0,
+        };
         self.turns += new;
         new
     }
@@ -349,6 +357,17 @@ mod tests {
         t.feed(c(0, 0));
         assert_eq!(t.feed(c(50, 70)), 1);
         assert_eq!(t.feed(c(100, 140)), 1);
+        assert_eq!(t.turns, 2);
+    }
+
+    #[test]
+    fn reply_and_next_request_in_one_tick() {
+        let mut t = TurnCounter::default();
+        t.feed(c(0, 0));
+        assert_eq!(t.feed(c(10, 0)), 0); // request 1
+        assert_eq!(t.feed(c(20, 500)), 1); // reply 1 + request 2
+        assert_eq!(t.feed(c(20, 1000)), 1); // reply 2
+        assert_eq!(t.feed(c(20, 1500)), 0); // rest of reply 2
         assert_eq!(t.turns, 2);
     }
 

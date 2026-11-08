@@ -451,12 +451,20 @@ fn watchdog(
             Some(Transition::Ended { start_ns, end_ns }) => {
                 s.stall_since_ns.store(0, Release);
                 s.freezes.fetch_add(1, Relaxed);
-                let netw = net.lock().map(|n| n.window(start_ns, end_ns)).unwrap_or_default();
+                // The sampler can lag the heartbeat by one interval: the last
+                // reply may land just after `end_ns`. Wait, then count a little
+                // past the end.
+                let grace_ns = (cfg.net_sample_ms * 3 + 2) * 1_000_000;
+                let wait = (end_ns + grace_ns).saturating_sub(mono_ns());
+                if wait > 0 {
+                    thread::sleep(Duration::from_nanos(wait));
+                }
+                let netw = net.lock().map(|n| n.window(start_ns, end_ns + grace_ns)).unwrap_or_default();
                 let mut i = inner.lock().unwrap();
                 let marks = i
                     .marks
                     .iter()
-                    .filter(|(t, _)| *t + 2_000_000_000 >= start_ns && *t <= end_ns)
+                    .filter(|(t, _)| *t + 1_000_000_000 >= start_ns && *t <= end_ns)
                     .map(|(_, l)| l.clone())
                     .collect();
                 let ev = Event::Freeze {
