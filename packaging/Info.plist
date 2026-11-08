@@ -13,13 +13,13 @@
 	<key>CFBundleName</key>
 	<string>FlightRecorder</string>
 	<key>CFBundlePackageType</key>
-	<string>BNDL</string>
+	<string>FMXT</string>
 	<key>CFBundleShortVersionString</key>
 	<string>@VERSION@</string>
 	<key>CFBundleVersion</key>
 	<string>@VERSION@</string>
 	<key>CFBundleSignature</key>
-	<string>FLRC</string>
+	<string>SCFR</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
 	<key>NSHumanReadableCopyright</key>

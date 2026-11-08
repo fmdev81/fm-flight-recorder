@@ -2,7 +2,8 @@
 //! struct layout, message constants, the options string, UTF-16 helpers.
 //!
 //! Written from the FMWrapper headers of the Claris plug-in SDK
-//! (FMXExtern.h, FMXCalcEngine.h, API version 62 / FileMaker 19+).
+//! (FMXExtern.h, FMXCalcEngine.h). Checked against SDK 26.0.3.307
+//! (fm_plugin_sdk_26.0.3.307.zip): same struct layout, kCurrentExtnVersion 77.
 //! We do not copy the headers into this repo; see docs/sdk-notes.md.
 
 /// FMX_ExternCallStruct (FMXExtern.h). macOS: `__attribute__((packed))`.
@@ -15,6 +16,7 @@ pub struct ExternCallStruct {
     pub entry_point: Option<unsafe extern "C" fn(*mut ExternCallStruct)>,
     pub cfm_calls: u8,
     pub which_call: u8,
+    /// SDK 26: "True if not on the main thread".
     pub unsafe_calls: u8,
     pub parm1: u8,
     pub parm2: u64,
@@ -46,10 +48,10 @@ pub const K_OPTIONS_STR: u8 = 131;
 pub const K_HELP_URL_STR: u8 = 132;
 
 // Extension versions
-pub const K_CURRENT_EXTN_VERSION: u64 = 62; // k190ExtnVersion
+pub const K_CURRENT_EXTN_VERSION: u64 = 77; // k260ExtnVersion (SDK 26.0.3)
 pub const K_DO_NOT_ENABLE: i64 = -2;
-/// kGet_* ids (FMX 18 / API 60) are needed for context capture.
-pub const K_MIN_SUPPORTED_EXTN_VERSION: i16 = 60;
+/// cCurrentEnv (API 62, FileMaker 19) and kGet_* ids (API 60) are needed.
+pub const K_MIN_SUPPORTED_EXTN_VERSION: i16 = 62;
 
 // Function flags (FMXCalcEngine.h)
 pub const K_DISPLAY_IN_ALL_DIALOGS: u32 = 0x0000_FF00;
@@ -58,8 +60,9 @@ pub const K_MAC_COMPATIBLE: u32 = 0x0000_0002;
 pub const K_DT_TEXT: i32 = 1; // Data::kDTText
 pub const K_LOCALE_SYSTEM: i32 = 1; // Locale::kType_System
 
-/// 4-character plug-in id. Not registered with Claris (prototype).
-pub const PLUGIN_ID: [u8; 4] = *b"FLRC";
+/// 4-character plug-in id. Rules: unique, low-ASCII alphanumerics, must not
+/// start with "F", "FM" or "Web" (reserved). Not registered (prototype).
+pub const PLUGIN_ID: [u8; 4] = *b"SCFR";
 pub const PLUGIN_NAME: &str = "FlightRecorder";
 
 /// The options string (kFMXT_OptionsStr), 11 characters:
@@ -177,7 +180,8 @@ mod tests {
 
     #[test]
     fn options() {
-        assert_eq!(options_string(false, true, true, false), "FLRC1nnYYnn");
+        assert_eq!(options_string(false, true, true, false), "SCFR1nnYYnn");
+        assert!(PLUGIN_ID[0] != b'F' && PLUGIN_ID.iter().all(|c| c.is_ascii_alphanumeric()));
         assert_eq!(get_string(K_OPTIONS_STR).len(), 11);
         assert_eq!(get_string(K_NAME_STR), "FlightRecorder");
     }

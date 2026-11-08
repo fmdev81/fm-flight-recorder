@@ -33,6 +33,9 @@ fn main() {
         .expect("FMWrapper.framework not found; set FMWRAPPER_FRAMEWORK_DIR");
     println!("cargo:warning=linking FMWrapper.framework from {}", dir.display());
     println!("cargo:rustc-link-search=framework={}", dir.display());
+    // SDK sample uses @loader_path/../Frameworks; the app's own copy is at
+    // @executable_path/../Frameworks. Both are harmless.
     println!("cargo:rustc-cdylib-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
+    println!("cargo:rustc-cdylib-link-arg=-Wl,-rpath,@loader_path/../Frameworks");
     println!("cargo:rustc-cdylib-link-arg=-Wl,-install_name,@rpath/FlightRecorder");
 }

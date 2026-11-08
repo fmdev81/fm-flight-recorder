@@ -25,7 +25,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS"
 lipo -create "${libs[@]}" -output "$OUT/Contents/MacOS/FlightRecorder"
 sed "s/@VERSION@/$VERSION/g" packaging/Info.plist > "$OUT/Contents/Info.plist"
-printf 'BNDLFLRC' > "$OUT/Contents/PkgInfo"
+printf 'FMXTSCFR' > "$OUT/Contents/PkgInfo"
 
 # The bundle must expose the entry point by name.
 nm -gU "$OUT/Contents/MacOS/FlightRecorder" | grep -q '_FMExternCallProc$' \

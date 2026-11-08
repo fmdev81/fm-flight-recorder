@@ -5,8 +5,8 @@
 //!   thread. Only that thread calls FMWrapper. The recorder threads never do.
 //! * Idle handling is cheap: an atomic heartbeat, and at most every 250 ms
 //!   (or right after a freeze) a context read, and only when FileMaker says
-//!   calls are safe (`unsafeCalls == 0`, level user idle / not idle /
-//!   script paused).
+//!   calls are safe (`unsafeCalls == 0`, which SDK 26 documents as "not on
+//!   the main thread"; level user idle / not idle / script paused).
 //! * No panic crosses the C boundary: every entry is wrapped in catch_unwind.
 
 mod ffi;
