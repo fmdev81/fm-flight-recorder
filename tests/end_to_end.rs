@@ -158,6 +158,8 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
     assert_eq!(after.as_ref().unwrap().layout, "Invoice Detail");
     assert!(net.connected);
     assert!((10..=12).contains(&net.round_trips), "{net:?}");
+    // The fake server answers at once: waits are tiny next to the 45 ms gaps.
+    assert!(net.wait_ms < 120, "{net:?}");
     assert_eq!(marks, &vec!["open invoice".to_string()]);
     let _ = std::fs::remove_dir_all(&dir);
 }

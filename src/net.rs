@@ -39,39 +39,52 @@ pub trait NetProbe: Send {
 }
 
 /// Pure turn detector. Feed it counter samples in time order.
+///
+/// Besides counting turns it adds up how long each request waited for its
+/// reply (`wait_ns`): network latency plus server work plus lock waits, as
+/// seen by the client, to the resolution of the sample interval. The TCP
+/// smoothed RTT cannot give this: it measures ACKs, not server answers.
 #[derive(Debug, Clone, Default)]
 pub struct TurnCounter {
     last: Option<NetCounters>,
-    /// True when the client sent data that has no answer yet.
-    awaiting_reply: bool,
+    /// Some(t) when the client sent data at t that has no answer yet.
+    awaiting_since: Option<u64>,
     pub turns: u64,
+    pub wait_ns: u64,
 }
 
 impl TurnCounter {
-    /// Returns the number of new turns found in this sample (0 or 1).
+    /// Untimed variant (tests): waits are not measured.
     pub fn feed(&mut self, c: NetCounters) -> u64 {
+        self.feed_at(0, c)
+    }
+
+    /// Returns the number of new turns found in this sample (0 or 1).
+    pub fn feed_at(&mut self, t_ns: u64, c: NetCounters) -> u64 {
         let Some(prev) = self.last.replace(c) else { return 0 };
         // A connection went away or was replaced: counters went down. Restart.
         if c.tx_bytes < prev.tx_bytes || c.rx_bytes < prev.rx_bytes || c.connections != prev.connections {
-            self.awaiting_reply = false;
+            self.awaiting_since = None;
             return 0;
         }
         let sent = c.tx_bytes > prev.tx_bytes;
         let got = c.rx_bytes > prev.rx_bytes;
-        let new = match (sent, got) {
+        let new = match (sent, got, self.awaiting_since) {
             // Reply to an earlier request, and the next request, in one tick.
-            (true, true) if self.awaiting_reply => 1, // still awaiting the new one
-            // Request and its reply in one tick.
-            (true, true) => {
-                self.awaiting_reply = false;
+            (true, true, Some(since)) => {
+                self.wait_ns += t_ns.saturating_sub(since);
+                self.awaiting_since = Some(t_ns);
                 1
             }
-            (false, true) if self.awaiting_reply => {
-                self.awaiting_reply = false;
+            // Request and its reply inside one tick: a sub-tick wait.
+            (true, true, None) => 1,
+            (false, true, Some(since)) => {
+                self.wait_ns += t_ns.saturating_sub(since);
+                self.awaiting_since = None;
                 1
             }
-            (true, false) => {
-                self.awaiting_reply = true;
+            (true, false, None) => {
+                self.awaiting_since = Some(t_ns);
                 0
             }
             _ => 0,
@@ -90,6 +103,9 @@ pub struct NetWindow {
     pub tx_packets: u64,
     pub rx_packets: u64,
     pub srtt_ms: u32,
+    /// Time requests waited for their replies (network + server), ms.
+    #[serde(default)]
+    pub wait_ms: u64,
     /// False when no FileMaker Server connection was found.
     pub connected: bool,
 }
@@ -99,8 +115,8 @@ pub struct NetWindow {
 #[derive(Debug, Default)]
 pub struct NetHistory {
     counter: TurnCounter,
-    /// (t_ns, cumulative turns, counters) – only stored when something changed.
-    points: std::collections::VecDeque<(u64, u64, NetCounters)>,
+    /// (t_ns, cumulative turns, cumulative wait ns, counters) – only stored when something changed.
+    points: std::collections::VecDeque<(u64, u64, u64, NetCounters)>,
     keep_ns: u64,
 }
 
@@ -110,10 +126,10 @@ impl NetHistory {
     }
 
     pub fn push(&mut self, t_ns: u64, c: NetCounters) {
-        self.counter.feed(c);
-        let changed = self.points.back().map(|p| p.2 != c).unwrap_or(true);
+        self.counter.feed_at(t_ns, c);
+        let changed = self.points.back().map(|p| p.3 != c).unwrap_or(true);
         if changed {
-            self.points.push_back((t_ns, self.counter.turns, c));
+            self.points.push_back((t_ns, self.counter.turns, self.counter.wait_ns, c));
         }
         while let Some(&(t0, ..)) = self.points.front() {
             if t_ns.saturating_sub(t0) > self.keep_ns && self.points.len() > 1 {
@@ -124,7 +140,7 @@ impl NetHistory {
         }
     }
 
-    fn at(&self, t_ns: u64) -> Option<&(u64, u64, NetCounters)> {
+    fn at(&self, t_ns: u64) -> Option<&(u64, u64, u64, NetCounters)> {
         // Last point at or before t.
         let idx = self.points.partition_point(|p| p.0 <= t_ns);
         if idx == 0 {
@@ -139,7 +155,7 @@ impl NetHistory {
         let (Some(a), Some(b)) = (self.at(start_ns), self.at(end_ns)) else {
             return NetWindow::default();
         };
-        let (ca, cb) = (a.2, b.2);
+        let (ca, cb) = (a.3, b.3);
         let same_conns = ca.connections == cb.connections;
         let d = |x: u64, y: u64| if same_conns { y.saturating_sub(x) } else { y };
         NetWindow {
@@ -149,6 +165,7 @@ impl NetHistory {
             tx_packets: d(ca.tx_packets, cb.tx_packets),
             rx_packets: d(ca.rx_packets, cb.rx_packets),
             srtt_ms: cb.srtt_ms,
+            wait_ms: b.2.saturating_sub(a.2) / 1_000_000,
             connected: cb.connections > 0,
         }
     }
@@ -412,6 +429,22 @@ mod tests {
         // Only trips 3..=5 finished between 250 ms and 560 ms.
         let w = h.window(250 * ms, 560 * ms);
         assert_eq!(w.round_trips, 3);
+    }
+
+    #[test]
+    fn wait_time_is_request_to_reply() {
+        let ms = 1_000_000u64;
+        let mut t = TurnCounter::default();
+        t.feed_at(0, c(0, 0));
+        t.feed_at(10 * ms, c(10, 0)); // request seen at 10 ms
+        t.feed_at(20 * ms, c(10, 0));
+        t.feed_at(2_010 * ms, c(10, 500)); // reply at 2010 ms (record lock)
+        assert_eq!(t.wait_ns, 2_000 * ms);
+        t.feed_at(2_020 * ms, c(20, 500));
+        t.feed_at(2_045 * ms, c(30, 900)); // reply 2 + request 3
+        t.feed_at(2_070 * ms, c(30, 1300)); // reply 3
+        assert_eq!(t.turns, 3);
+        assert_eq!(t.wait_ns, (2_000 + 25 + 25) * ms);
     }
 
     #[test]

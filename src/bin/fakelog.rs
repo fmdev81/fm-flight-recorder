@@ -118,6 +118,13 @@ fn main() {
         }
         let before = ctx_with_cost(ctx(&prev_layout, "", if rng.f() < 0.5 { script } else { "" }), &mut rng);
         let after = ctx_with_cost(ctx(layout, table, ""), &mut rng);
+        // Request -> reply time: RTT plus a few ms of server work per call,
+        // and now and then a commit that waits on a record lock.
+        let mut wait = rts * (rtt as u64 + rng.range(2, 12));
+        if script == "Commit Order" && rng.f() < 0.4 {
+            wait += dur * 3 / 4;
+        }
+        let wait = wait.min(dur);
         lines.push(Event::Freeze {
             ts: iso_from_unix_ms(t),
             end_ts: iso_from_unix_ms(t + dur as i64),
@@ -132,6 +139,7 @@ fn main() {
                 tx_packets: rts * 2,
                 rx_packets: rts * rng.range(2, 9),
                 srtt_ms: rtt,
+                wait_ms: wait,
                 connected: true,
             },
             marks: vec![],
@@ -152,6 +160,7 @@ fn main() {
                     tx_bytes: d * 30,
                     rx_bytes: d * 900,
                     srtt_ms: rtt,
+                    wait_ms: d / 3,
                     connected: true,
                     ..Default::default()
                 },
