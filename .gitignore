@@ -1,0 +1,4 @@
+target/
+*.fmplugin
+dist/
+.DS_Store

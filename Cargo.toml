@@ -1,0 +1,32 @@
+[package]
+name = "fm_flight_recorder"
+version = "0.1.0"
+edition = "2021"
+description = "Flight recorder for FileMaker Pro client-side freezes (prototype)"
+license = "MIT"
+publish = false
+
+[lib]
+# cdylib = the plug-in binary that goes into FlightRecorder.fmplugin/Contents/MacOS
+# rlib   = so the core can be unit-tested and used by the examples/bins
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# The FileMaker glue (FMExternCallProc + external functions). It links against
+# FMWrapper.framework. Off by default so the core builds and tests anywhere.
+fmx = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[[bin]]
+name = "fr-fakelog"
+path = "src/bin/fakelog.rs"
+
+[profile.release]
+panic = "abort"   # never unwind across the C boundary into FileMaker
+lto = true
+codegen-units = 1
