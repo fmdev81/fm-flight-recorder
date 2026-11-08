@@ -10,6 +10,7 @@
 pub mod context;
 pub mod detector;
 pub mod eventlog;
+pub mod fmxabi;
 pub mod net;
 pub mod recorder;
 #[cfg(target_os = "macos")]

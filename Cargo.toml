@@ -27,6 +27,6 @@ name = "fr-fakelog"
 path = "src/bin/fakelog.rs"
 
 [profile.release]
-panic = "abort"   # never unwind across the C boundary into FileMaker
+# panic = "unwind" (default) so the glue can catch_unwind at every C entry
 lto = true
 codegen-units = 1

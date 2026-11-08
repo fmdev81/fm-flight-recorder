@@ -199,8 +199,8 @@ pub struct Recorder {
     cfg: Config,
     shared: Arc<Shared>,
     inner: Arc<Mutex<Inner>>,
-    tx: Option<Sender<Event>>,
-    threads: Vec<JoinHandle<()>>,
+    tx: Mutex<Option<Sender<Event>>>,
+    threads: Mutex<Vec<JoinHandle<()>>>,
     clock: Clock,
     writer_dir: PathBuf,
 }
@@ -282,7 +282,7 @@ impl Recorder {
         });
 
         let writer_dir = cfg.log_dir.clone();
-        Recorder { cfg, shared, inner, tx: Some(tx), threads, clock, writer_dir }
+        Recorder { cfg, shared, inner, tx: Mutex::new(Some(tx)), threads: Mutex::new(threads), clock, writer_dir }
     }
 
     pub fn config(&self) -> &Config {
@@ -372,18 +372,22 @@ impl Recorder {
     }
 
     fn send(&self, e: Event) {
-        if let Some(tx) = &self.tx {
+        if let Some(tx) = self.tx.lock().unwrap().as_ref() {
             let _ = tx.send(e);
         }
     }
 
     /// Stop threads, flush pending freezes, write session_stop.
-    pub fn stop(mut self) -> Status {
+    pub fn stop(&self) -> Status {
         self.shutdown();
         self.status()
     }
 
-    fn shutdown(&mut self) {
+    pub fn is_running(&self) -> bool {
+        self.shared.running.load(Acquire)
+    }
+
+    fn shutdown(&self) {
         if !self.shared.running.swap(false, AcqRel) {
             return;
         }
@@ -398,8 +402,9 @@ impl Recorder {
             heartbeats: self.shared.beats.load(Relaxed),
         });
         // The watchdog holds a Sender clone; it exits on `running == false`.
-        self.tx = None;
-        for t in self.threads.drain(..) {
+        *self.tx.lock().unwrap() = None;
+        let threads: Vec<_> = self.threads.lock().unwrap().drain(..).collect();
+        for t in threads {
             let _ = t.join();
         }
     }
