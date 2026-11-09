@@ -81,3 +81,4 @@ To see a summary of the log, run `python3 scripts/summary.py`.
 
 - [docs/design.md](docs/design.md): the design, the log format, and the test plan.
 - [docs/sdk-notes.md](docs/sdk-notes.md): notes about the Claris plug-in SDK.
+- [docs/ingest-api.md](docs/ingest-api.md): the API that the plug-in uses to send events to the companion server.

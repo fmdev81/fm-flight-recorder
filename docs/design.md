@@ -62,6 +62,7 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `src/net.rs` | Turn counter, net history, macOS in-process TCP probe |
 | `src/eventlog.rs` | JSONL schema and writer |
 | `src/recorder.rs` | Threads, the main-thread API, options |
+| `src/wire.rs` | Wire types of the ingest API ([ingest-api.md](ingest-api.md)) |
 | `src/runloop.rs` | `CFRunLoopObserver` heartbeat (plus timer helpers for the simulator) |
 | `src/fmxabi.rs` | FMX ABI facts (struct layout, constants, options string), tested without FileMaker |
 | `src/fmx/` | The plug-in glue (feature `fmx`): `FMExternCallProc`, external functions, FFI to FMWrapper |
