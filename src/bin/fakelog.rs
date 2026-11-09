@@ -108,6 +108,10 @@ fn main() {
         threshold_ms: 250,
         heartbeat: "idle+runloop".into(),
         port: 5003,
+        client: "Front Desk iMac".into(),
+        install_id: "3f9c2a7e5b0d4e1f8a6c9b2d7e4f1a03".into(),
+        machine: "Front-Desk-iMac.local".into(),
+        os: "macOS 26.0.1".into(),
     });
 
     let total_weight: u32 = HOTSPOTS.iter().map(|h| h.5).sum();
