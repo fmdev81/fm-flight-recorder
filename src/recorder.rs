@@ -118,6 +118,8 @@ pub struct Config {
     pub send_retry_max_ms: u64,
     /// Size cap of the offline spool (`<log_dir>/spool/`); 0 = no spool.
     pub send_spool_max_bytes: u64,
+    /// Ping the server this often while an endpoint is set.
+    pub send_ping_ms: u64,
 }
 
 /// Events waiting for the writer thread. Full = lost and counted.
@@ -241,6 +243,7 @@ impl Default for Config {
             send_retry_ms: 1000,
             send_retry_max_ms: 300_000,
             send_spool_max_bytes: 20 << 20,
+            send_ping_ms: 60_000,
         }
     }
 }
@@ -483,9 +486,20 @@ impl Recorder {
                     // to the server it was made for.
                     spool_dir: Some(cfg.log_dir.join("spool").join(spool_key)),
                     spool_max_bytes: cfg.send_spool_max_bytes,
+                    ping_interval: Duration::from_millis(cfg.send_ping_ms.max(100)),
                 },
                 session_id.clone(),
                 client_info.clone(),
+                {
+                    let (sh, ls) = (shared.clone(), last_seq.clone());
+                    Arc::new(move || crate::sender::PingCounters {
+                        running: sh.running.load(Relaxed),
+                        heartbeats: sh.beats.load(Relaxed),
+                        idle_messages: sh.idle_msgs.load(Relaxed),
+                        freezes: sh.freezes.load(Relaxed),
+                        last_seq: ls.load(Relaxed),
+                    })
+                },
             ))
         });
         {

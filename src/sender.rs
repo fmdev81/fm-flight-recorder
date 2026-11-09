@@ -22,7 +22,7 @@
 use crate::http::{self, Abort, Timeouts};
 use crate::recorder::Endpoint;
 use crate::spool::Spool;
-use crate::wire::{ClientInfo, IngestReply, API_VERSION, PATH_EVENTS};
+use crate::wire::{ClientInfo, IngestReply, Ping, API_VERSION, PATH_EVENTS, PATH_PING};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::*};
@@ -52,7 +52,22 @@ pub struct SendSettings {
     pub spool_dir: Option<PathBuf>,
     /// Size cap of the spool; 0 = no spool.
     pub spool_max_bytes: u64,
+    /// A ping goes out this often (docs/ingest-api.md).
+    pub ping_interval: Duration,
 }
+
+/// The counters a ping carries (the same as in Status).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PingCounters {
+    pub running: bool,
+    pub heartbeats: u64,
+    pub idle_messages: u64,
+    pub freezes: u64,
+    pub last_seq: u64,
+}
+
+/// Reads the counters for a ping (atomics only; called on the sender thread).
+pub type CounterSource = Arc<dyn Fn() -> PingCounters + Send + Sync>;
 
 /// Counters, read by Status. Written by the writer and sender threads.
 #[derive(Debug, Default)]
@@ -66,6 +81,10 @@ pub struct SendStats {
     pub spooled: AtomicU64,
     /// Events the server said it had already (resends).
     pub duplicates: AtomicU64,
+    /// Pings the server accepted.
+    pub pings: AtomicU64,
+    /// Unix ms of the last accepted ping, 0 = never.
+    pub last_ping_unix_ms: AtomicI64,
     /// Failed posts (network error, timeout, 401, 5xx).
     pub failures: AtomicU64,
     /// Unix ms of the last accepted batch, 0 = never.
@@ -211,6 +230,7 @@ impl Sender {
         settings: SendSettings,
         session_id: String,
         client: Arc<OnceLock<ClientInfo>>,
+        counters: CounterSource,
     ) -> Sender {
         let queue = Arc::new(SendQueue::new(settings.queue_max));
         let stats = Arc::new(SendStats::default());
@@ -230,6 +250,7 @@ impl Sender {
             session_id: session_id.clone(),
             client: client.clone(),
             abort: abort.clone(),
+            counters,
         };
         let thread = thread::Builder::new()
             .name("fr-sender".into())
@@ -314,6 +335,7 @@ struct Worker {
     session_id: String,
     client: Arc<OnceLock<ClientInfo>>,
     abort: Abort,
+    counters: CounterSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -376,11 +398,21 @@ impl Worker {
         let mut spool_pending = self.spool.as_ref().is_some_and(|s| !s.is_empty());
         let mut spool_ok = true;
         self.update_spool_count();
+        let mut next_ping = Instant::now() + self.s.ping_interval;
         loop {
             if self.queue.is_stopped() {
                 return;
             }
             let auth_failed = self.stats.auth_failed.load(Relaxed);
+            // 0. The ping. Never queued: a failed ping is replaced by the next.
+            if Instant::now() >= next_ping {
+                next_ping = Instant::now() + self.s.ping_interval;
+                if !auth_failed && self.ping() == Post::Accepted && !b.ready() {
+                    // The server is back: do not wait for the backoff.
+                    b.ok();
+                }
+                continue;
+            }
             // 1. The spool first, oldest file first.
             if spool_pending && !auth_failed && b.ready() {
                 let spool = self.spool.as_ref().unwrap();
@@ -404,11 +436,11 @@ impl Worker {
             // wait in the queue until the next try.
             let spool_usable = self.spool.is_some() && spool_ok;
             let gate = if spool_usable { None } else { b.until };
-            let wake = if spool_pending && !auth_failed {
-                b.until
-            } else {
-                None
+            let wake = match (spool_pending && !auth_failed, b.until) {
+                (true, Some(t)) => t.min(next_ping),
+                _ => next_ping,
             };
+            let wake = Some(wake);
             let batch = match self.next_batch(gate, wake) {
                 Next::Stop => return,
                 Next::Wake => continue,
@@ -515,6 +547,55 @@ impl Worker {
             out.push((i.seq, i.line.clone()));
         }
         Next::Batch(out)
+    }
+
+    /// Post a ping with the current counters.
+    fn ping(&self) -> Post {
+        let c = (self.counters)();
+        let p = Ping {
+            v: API_VERSION,
+            session_id: self.session_id.clone(),
+            client: self.client.get().cloned().unwrap_or_default(),
+            ts: crate::eventlog::iso_now(),
+            running: c.running,
+            heartbeats: c.heartbeats,
+            idle_messages: c.idle_messages,
+            freezes: c.freezes,
+            last_seq: c.last_seq,
+        };
+        let body = serde_json::to_string(&p).expect("ping serializes");
+        let st = &self.stats;
+        let r = http::post_json(
+            &self.s.endpoint,
+            PATH_PING,
+            &self.s.token,
+            body.as_bytes(),
+            self.s.timeouts,
+            &self.abort,
+        );
+        match r {
+            Ok(resp) if resp.status == 200 => {
+                st.pings.fetch_add(1, Relaxed);
+                st.last_ping_unix_ms
+                    .store(crate::eventlog::unix_ms_now(), Relaxed);
+                Post::Accepted
+            }
+            Ok(resp) if resp.status == 401 => {
+                st.auth_failed.store(true, Relaxed);
+                st.set_error(
+                    "ping: HTTP 401: bad token, sending stopped until FlightRecorder_Start",
+                );
+                Post::Unauthorized
+            }
+            Ok(resp) => {
+                st.set_error(format!("ping: HTTP {}: {}", resp.status, short(&resp.body)));
+                Post::Failed
+            }
+            Err(e) => {
+                st.set_error(format!("ping: {e}"));
+                Post::Failed
+            }
+        }
     }
 
     /// Post one batch body of `n` events and count the result.
