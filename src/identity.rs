@@ -29,14 +29,32 @@ fn is_id(s: &str) -> bool {
 
 /// Default folder for the install id (and other plug-in state):
 /// $FLIGHT_RECORDER_STATE_DIR, else ~/Library/Application Support/FlightRecorder.
+/// Empty if there is no home folder: then the install id is not kept.
 pub fn default_state_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("FLIGHT_RECORDER_STATE_DIR") {
         return PathBuf::from(d);
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    home.join("Library/Application Support/FlightRecorder")
+    match home_dir() {
+        Some(h) => h.join("Library/Application Support/FlightRecorder"),
+        None => PathBuf::new(),
+    }
+}
+
+/// $HOME, else the home folder of the user in the password database.
+fn home_dir() -> Option<PathBuf> {
+    if let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        return Some(PathBuf::from(h));
+    }
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if pw.is_null() || (*pw).pw_dir.is_null() {
+            return None;
+        }
+        let d = std::ffi::CStr::from_ptr((*pw).pw_dir);
+        Some(PathBuf::from(
+            std::ffi::OsStr::from_encoded_bytes_unchecked(d.to_bytes()),
+        ))
+    }
 }
 
 /// Read `<dir>/install-id`, or make it once. If the disk fails, the id is
@@ -50,11 +68,29 @@ pub fn install_id(dir: &Path) -> (String, Option<String>) {
         }
     }
     let id = random_id();
+    if dir.as_os_str().is_empty() {
+        return (id, Some("install id: no home folder, id not kept".into()));
+    }
     let write = || -> std::io::Result<()> {
-        fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("install-id.{}.tmp", std::process::id()));
-        fs::write(&tmp, format!("{id}\n"))?;
-        fs::rename(&tmp, &path)
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        // A new file with a random name: never follows or reuses a link.
+        let tmp = dir.join(format!("install-id.{}.tmp", random_id()));
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&tmp)?;
+        let r = f.write_all(format!("{id}\n").as_bytes());
+        drop(f);
+        r.and_then(|_| fs::rename(&tmp, &path)).inspect_err(|_| {
+            let _ = fs::remove_file(&tmp);
+        })
     };
     match write() {
         Ok(()) => (id, None),
@@ -192,6 +228,13 @@ mod tests {
         let (c, _) = install_id(&dir);
         assert!(is_id(&c) && c != a);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_id_without_home_is_not_kept() {
+        let (id, err) = install_id(Path::new(""));
+        assert!(is_id(&id));
+        assert!(err.is_some());
     }
 
     #[test]
