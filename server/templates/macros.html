@@ -1,0 +1,63 @@
+{% macro split(sp) %}<div class="hb" role="img" aria-label="{{ sp.title }}" title="{{ sp.title }}"><div class="hs" style="width: {{ sp.s }}"></div><div class="hc" style="width: {{ sp.c }}"></div></div>{% endmacro %}
+
+{% macro keys() %}<span class="key"><span class="sw sw-s"></span>Server wait</span><span class="key"><span class="sw sw-c"></span>Client time</span>{% endmacro %}
+
+{% macro hist(h, cls) %}
+{% if h.total() %}
+<div class="hist">{% for b in h.bars %}<div class="hcol" title="{{ b.title }}"><span class="n">{{ b.n }}</span><span class="hbar {{ cls }}" style="height: {{ b.h }}"></span></div>{% endfor %}</div>
+<div class="hlabels">{% for b in h.bars %}<span>{{ b.label }}</span>{% endfor %}</div>
+{% else %}<div class="empty">No freezes</div>{% endif %}
+{% endmacro %}
+
+{% macro tiles(ts, cls) %}
+<div class="grid {{ cls }}">
+{% for t in ts %}
+<div class="card tile">
+<div class="lbl">{{ t.label }}</div>
+<div class="big">{% if !t.link.is_empty() %}<a href="{{ t.link }}">{{ t.big }}</a>{% else %}{{ t.big }}{% endif %}{% if !t.small.is_empty() %} <span class="small">{{ t.small }}</span>{% endif %}</div>
+{% if let Some(sp) = t.split %}{% call split(sp) %}{% endif %}
+<div class="sub">{{ t.sub }}{% if !t.chip.is_empty() %} <span class="flag">{{ t.chip }}</span>{% endif %}</div>
+{% if !t.cmp.is_empty() %}<div class="sub cmp">{{ t.cmp }}</div>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro chart(title, c) %}
+<div class="card">
+<div class="ch"><h2 class="ct">{{ title }}</h2>{% call keys() %}</div>
+{% if c.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="readout sub" aria-live="polite"></div>
+<div class="chart" data-chart="{{ c.json() }}"></div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro ntable(rows, head, sub) %}
+{% if rows.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>{{ head }}</th><th class="w34">Frozen</th><th class="r">Freezes</th><th class="r">Total</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr><td>{% if r.url.is_empty() %}<span class="muted">{{ r.name }}</span>{% else %}<a href="{{ r.url }}"{% if r.mono %} class="mono"{% endif %}{% if r.muted %} style="color: var(--muted)"{% endif %}>{{ r.name }}</a>{% endif %}{% if sub && !r.sub.is_empty() %} <span class="muted">{{ r.sub }}</span>{% endif %}</td>
+<td>{% call split(r.split) %}</td><td class="r">{{ r.n }}</td><td class="r">{{ r.total }}</td><td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+{% endmacro %}
+
+{% macro events(rows, show_account, show_client) %}
+{% if rows.is_empty() %}<div class="empty">No events</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Time</th><th>Type</th>{% if show_account %}<th>Account</th>{% endif %}{% if show_client %}<th>Client</th>{% endif %}<th>Layout</th><th>From</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr><td class="mono">{% if r.url.is_empty() %}{{ r.t }}{% else %}<a class="lite" href="{{ r.url }}">{{ r.t }}</a>{% endif %}</td>
+<td>{{ r.kind }}</td>
+{% if show_account %}<td><a href="{{ r.user_url }}" class="mono">{{ r.account }}</a> <span class="muted">{{ r.user }}</span></td>{% endif %}
+{% if show_client %}<td><a class="lite" href="{{ r.client_url }}">{{ r.client }}</a></td>{% endif %}
+<td><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
+<td class="muted">{{ r.from }}</td>
+<td>{% if r.script_url.is_empty() %}<span class="muted">{{ r.script }}</span>{% else %}<a class="lite" href="{{ r.script_url }}">{{ r.script }}</a>{% endif %}</td>
+<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td><td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+{% endmacro %}

@@ -4,6 +4,7 @@
 //! - `store`: batches and pings into SQLite; `db`: schema and settings.
 //! - `query`: facts, aggregates, series, flags; `rollup`: daily totals and
 //!   retention; `tz`: the server time zone.
+//! - `web`: the dashboard pages (askama templates, embedded static files).
 //! - `import`: JSONL logs; `fake`: synthetic data.
 
 pub mod api;
@@ -19,3 +20,4 @@ pub mod rollup;
 pub mod store;
 pub mod tz;
 pub mod views;
+pub mod web;

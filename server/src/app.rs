@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::db::{self, Db, Settings};
 use crate::tz::{now_ms, Zone};
-use crate::{api, logln, rollup};
+use crate::{api, logln, rollup, web};
 use axum::Router;
 use chrono::NaiveDate;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -121,7 +121,10 @@ where
 }
 
 pub fn router(app: Shared) -> Router {
-    Router::new().merge(api::routes()).with_state(app)
+    Router::new()
+        .merge(api::routes())
+        .merge(web::routes())
+        .with_state(app)
 }
 
 /// The jobs: close the sessions of offline clients (each minute), daily

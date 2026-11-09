@@ -1,0 +1,30 @@
+{% if v.ctl.show_file %}
+<form class="fl" method="get" action="{{ v.ctl.path }}">
+{% for kv in v.ctl.keep %}<input type="hidden" name="{{ kv.0 }}" value="{{ kv.1 }}">{% endfor %}
+{% if v.ctl.show_range %}<input type="hidden" name="range" value="{{ v.ctl.range }}">{% if v.ctl.is_custom() %}<input type="hidden" name="from" value="{{ v.ctl.from }}"><input type="hidden" name="to" value="{{ v.ctl.to }}">{% endif %}{% endif %}
+<label class="fl" for="file-sel">File
+<select id="file-sel" name="file" class="fsel" data-autosubmit>
+<option value="all"{% if v.ctl.file.is_empty() %} selected{% endif %}>All files</option>
+{% for f in v.ctl.files %}<option value="{{ f }}"{% if *f == v.ctl.file %} selected{% endif %}>{{ f }}</option>{% endfor %}
+</select></label>
+<noscript><button class="btn" type="submit">Apply</button></noscript>
+</form>
+{% endif %}
+{% if v.ctl.show_range %}
+<div class="seg" role="group" aria-label="Range">
+<a href="{{ v.ctl.range_url("today") }}" aria-pressed="{{ v.ctl.pressed("today") }}">Today</a>
+<a href="{{ v.ctl.range_url("7d") }}" aria-pressed="{{ v.ctl.pressed("7d") }}">7 days</a>
+<a href="{{ v.ctl.range_url("custom") }}" aria-pressed="{{ v.ctl.pressed("custom") }}">Custom</a>
+</div>
+{% if v.ctl.is_custom() %}
+<form class="ctl" method="get" action="{{ v.ctl.path }}">
+{% for kv in v.ctl.keep %}<input type="hidden" name="{{ kv.0 }}" value="{{ kv.1 }}">{% endfor %}
+<input type="hidden" name="range" value="custom">
+{% if !v.ctl.file.is_empty() %}<input type="hidden" name="file" value="{{ v.ctl.file }}">{% endif %}
+{% if v.ctl.cmp %}<input type="hidden" name="cmp" value="1">{% endif %}
+<label class="fl" for="r-from">From<input id="r-from" class="fsel" type="date" name="from" value="{{ v.ctl.from }}"></label>
+<label class="fl" for="r-to">To<input id="r-to" class="fsel" type="date" name="to" value="{{ v.ctl.to }}"></label>
+<button class="btn" type="submit">Apply</button>
+</form>
+{% endif %}
+{% endif %}

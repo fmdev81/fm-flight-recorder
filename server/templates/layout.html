@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block top %}
+<nav aria-label="Breadcrumb" class="crumbs"><a href="/layouts?{{ v.ctl.rq() }}">Layouts</a><span class="muted">/</span><span>{{ v.name }}</span></nav>
+<div class="title">
+<h1 class="h1">{{ v.name }}</h1>
+<div class="sub"><span>File {{ v.file }}</span>{% if !v.table.is_empty() %}<span>Table {{ v.table }}</span>{% endif %}{% if !v.rank.is_empty() %}<span>{{ v.rank }}</span>{% endif %}</div>
+</div>
+{% include "controls.html" %}
+<a class="btn" href="{{ v.ctl.cmp_url() }}" aria-pressed="{{ v.ctl.cmp }}">Compare to last week</a>
+{% endblock %}
+{% block content %}
+{% call m::tiles(v.tiles, "g-tiles") %}
+
+<div class="grid g-2">
+{% call m::chart(v.chart_title, v.chart) %}
+<div class="card">
+<div class="ch"><h2 class="ct">Durations by day</h2></div>
+{% if v.days.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Day</th><th class="r">Freezes</th><th class="r">Total</th><th class="r">p50</th><th class="r">p95</th><th class="r">Avg round trips</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for d in v.days %}<tr><td class="mono">{{ d.day }}</td><td class="r">{{ d.n }}</td><td class="r">{{ d.total }}</td><td class="r">{{ d.p50 }}</td><td class="r">{{ d.p95 }}</td><td class="r">{{ d.rt }}</td><td class="r">{{ d.pct }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+</div>
+
+<div class="grid g-3">
+<div class="card">
+<div class="ch"><h2 class="ct">Freezes by hour</h2></div>
+{% if v.hours.is_empty() %}<div class="empty">No freezes</div>{% else %}<div class="readout sub"></div><div class="chart" data-chart="{{ v.hours.json() }}"></div>{% endif %}
+</div>
+<div class="card"><div class="ch"><h2 class="ct">Freezes by duration</h2></div>{% call m::hist(v.by_dur, "") %}</div>
+<div class="card"><div class="ch"><h2 class="ct">Freezes by round trips</h2></div>{% call m::hist(v.by_rt, "srv") %}</div>
+</div>
+
+<div class="grid g-3">
+<div class="card"><div class="ch"><h2 class="ct">Users</h2></div>{% call m::ntable(v.users, "Account", true) %}</div>
+<div class="card"><div class="ch"><h2 class="ct">Scripts</h2></div>{% call m::ntable(v.scripts, "Script", false) %}</div>
+<div class="card">
+<div class="ch"><h2 class="ct">Came from</h2><span class="sub">layout before freeze</span></div>
+{% if v.from.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Layout</th><th class="w34">Freezes</th><th class="r">Freezes</th><th class="r">Total</th></tr></thead>
+<tbody>
+{% for r in v.from %}<tr><td>{% if r.url.is_empty() %}<span class="muted">{{ r.name }}</span>{% else %}<a href="{{ r.url }}">{{ r.name }}</a>{% endif %}</td><td><div class="hb"><div class="hn" style="width: {{ r.split.s }}"></div></div></td><td class="r">{{ r.n }}</td><td class="r">{{ r.total }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+</div>
+
+<div class="card">
+<div class="ch"><h2 class="ct">Latest freezes</h2><a href="/freezes?{{ v.ctl.rq() }}&file={{ v.file|urlencode }}&layout={{ v.name|urlencode }}" style="font-size: 12px">All freezes</a></div>
+{% if v.recent.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Time</th><th>Account</th><th>Client</th><th>From</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th style="width: 120px">Server / client</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in v.recent %}
+<tr><td class="mono"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td>
+<td><a href="{{ r.user_url }}" class="mono">{{ r.account }}</a> <span class="muted">{{ r.user }}</span></td>
+<td><a class="lite" href="{{ r.client_url }}">{{ r.client }}</a></td>
+<td class="muted">{{ r.from }}</td>
+<td><a class="lite" href="{{ r.script_url }}">{{ r.script }}</a></td>
+<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td>
+<td><div class="hb" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
+<td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+{% endblock %}

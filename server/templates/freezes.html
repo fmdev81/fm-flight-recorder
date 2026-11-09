@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block top %}
+<h1 class="h1" style="margin-right: auto">Freezes</h1>
+<span class="date">{{ v.ctl.date }}</span>
+<div class="seg" role="group" aria-label="Range">
+<a href="{{ v.ctl.range_url("today") }}" aria-pressed="{{ v.ctl.pressed("today") }}">Today</a>
+<a href="{{ v.ctl.range_url("7d") }}" aria-pressed="{{ v.ctl.pressed("7d") }}">7 days</a>
+<a href="{{ v.ctl.range_url("custom") }}" aria-pressed="{{ v.ctl.pressed("custom") }}">Custom</a>
+</div>
+<form class="filters" method="get" action="/freezes">
+<input type="hidden" name="range" value="{{ v.ctl.range }}">
+{% if v.ctl.is_custom() %}
+<label class="fl" for="r-from">From<input id="r-from" class="fsel" type="date" name="from" value="{{ v.ctl.from }}"></label>
+<label class="fl" for="r-to">To<input id="r-to" class="fsel" type="date" name="to" value="{{ v.ctl.to }}"></label>
+{% endif %}
+<label class="fl" for="fz-file">File
+<select id="fz-file" name="file" class="fsel" data-autosubmit>
+<option value="all">All files</option>
+{% for f in v.ctl.files %}<option value="{{ f }}"{% if *f == v.ctl.file %} selected{% endif %}>{{ f }}</option>{% endfor %}
+</select></label>
+<label class="fl" for="fz-layout">Layout
+<select id="fz-layout" name="layout" class="fsel" data-autosubmit>
+<option value="">All</option>
+{% for o in v.layouts %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+</select></label>
+<label class="fl" for="fz-account">Account
+<select id="fz-account" name="account" class="fsel" data-autosubmit>
+<option value="">All</option>
+{% for o in v.accounts %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+</select></label>
+<label class="fl" for="fz-script">Script
+<select id="fz-script" name="script" class="fsel" data-autosubmit>
+<option value="">All</option>
+{% for o in v.scripts %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+</select></label>
+<label class="fl" for="fz-client">Client
+<select id="fz-client" name="client" class="fsel" data-autosubmit>
+<option value="">All</option>
+{% for o in v.clients %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+</select></label>
+<noscript><button class="btn" type="submit">Apply</button></noscript>
+{% if v.ctl.is_custom() %}<button class="btn" type="submit">Apply</button>{% endif %}
+<a class="btn" href="/freezes?{{ v.ctl.rq() }}">Clear</a>
+</form>
+{% endblock %}
+{% block content %}
+<div class="card">
+<div class="ch"><h2 class="ct" id="fz-count">{{ v.shown }} of {{ v.total }} freezes</h2>{% call m::keys() %}</div>
+{% if v.rows.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw tall"><table class="t">
+<thead><tr><th>Time</th><th>File</th><th>Layout</th><th>From</th><th>Account</th><th>User</th><th>Client</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th style="width: 120px">Server / client</th><th class="r">Server</th></tr></thead>
+<tbody id="fz-body">
+{% include "freeze_tr.html" %}
+</tbody></table></div>
+<div class="more" id="fz-more">{% if !v.more_url.is_empty() %}<button type="button" class="btn" hx-get="{{ v.more_url }}" hx-target="#fz-body" hx-swap="beforeend">Load more</button>{% endif %}</div>
+{% endif %}
+</div>
+{% endblock %}

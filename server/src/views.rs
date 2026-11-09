@@ -2794,10 +2794,15 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
     let mut axis = vec![];
     let mut t = (a0 / step + 1) * step;
     while t < a1 {
-        axis.push((
-            format!("{:.2}%", x(t)),
-            format!("{}.{:03}", ctx.z.fmt(t, "%H:%M:%S"), t.rem_euclid(1000)),
-        ));
+        let xt = x(t);
+        if (6.0..=94.0).contains(&xt) {
+            let label = if step % 1000 == 0 {
+                ctx.z.fmt(t, "%H:%M:%S")
+            } else {
+                format!("{}.{:03}", ctx.z.fmt(t, "%H:%M:%S"), t.rem_euclid(1000))
+            };
+            axis.push((format!("{xt:.2}%"), label));
+        }
         t += step;
     }
     let ms = |t: i64| format!("{}.{:03}", ctx.z.fmt(t, "%H:%M:%S"), t.rem_euclid(1000));
