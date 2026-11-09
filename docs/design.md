@@ -26,14 +26,12 @@ Status: **prototype.**
   - The plug-in links against the Claris SDK 26.0.3 `FMWrapper.framework`.
     `scripts/check-abi.sh` checks the ABI against the SDK headers.
   - The plug-in loads and records freezes in FileMaker Pro 26.0.3 on macOS.
-  - The plug-in can send its events to a companion server ([ingest-api.md](ingest-api.md)),
+  - The plug-in can send its events to the companion server ([ingest-api.md](ingest-api.md)),
     with an offline spool and a ping.
-- What is not done: a test with a file on FileMaker Server (the test plan below).
-
-**Not built yet:** the companion server and its dashboard
-([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21),
-[#22](https://github.com/solutionscay/fm-flight-recorder/issues/22),
-[#23](https://github.com/solutionscay/fm-flight-recorder/issues/23)).
+  - The companion server (`server/`, `fr-server`) stores the events and serves the dashboard
+    ([Companion server](#companion-server)).
+- What is not done: a test with a file on FileMaker Server (the test plan below), and a test of
+  the plug-in with the server at a site.
 
 Research, sources and the three feasibility answers: [sdk-notes.md](sdk-notes.md).
 
@@ -112,7 +110,9 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `src/bin/fakelog.rs` | `fr-fakelog`: writes a realistic fake log for demos |
 | `tests/` | End-to-end tests with the real recorder: `end_to_end.rs`, and `send.rs`, `spool.rs`, `ping.rs` with a local test receiver (`tests/common/`) |
 | `packaging/Info.plist` | The bundle `Info.plist` template |
-| `scripts/` | `build-plugin.sh`, `install-plugin.sh`, `check-abi.sh` (with `check-abi.cpp`), `selftest-in-filemaker.sh`, `summary.py` |
+| `scripts/` | `build-plugin.sh`, `build-server.sh`, `install-plugin.sh`, `check-abi.sh` (with `check-abi.cpp`), `selftest-in-filemaker.sh`, `summary.py` |
+| `server/` | The companion server `fr-server` ([Companion server](#companion-server), [server/README.md](../server/README.md)) |
+| `packaging/fr-server.plist` | launchd job for the server |
 
 ## Build, install and try it
 
@@ -178,6 +178,74 @@ If FileMaker does not list the plug-in, check:
 - `codesign -v --strict` on the installed bundle
 - for duplicates in `~/Library/Application Support/FileMaker/FileMaker Pro/26.0/Extensions/`
 - `Get ( InstalledFMPlugIns )`
+
+## Companion server
+
+`fr-server` is one program for a Mac on the LAN. It receives the events of the plug-ins and
+serves the dashboard. The install steps are in [README.md](../README.md#run-the-companion-server).
+
+- **Stack.** Rust, a member of the Cargo workspace. axum and tokio for HTTP, rusqlite with the
+  bundled SQLite (WAL mode), askama templates. htmx and uPlot are vendored in `server/static/vendor/`
+  (htmx 2.0.4, 0BSD license; uPlot 1.6.31, MIT license). All static files are in the binary.
+  No npm, no build step for the pages.
+- **Wire types.** The server uses the types of the plug-in crate (`src/wire.rs`, `src/eventlog.rs`),
+  so the two sides cannot drift. The API is in [ingest-api.md](ingest-api.md).
+- **Security.** Plain HTTP on the LAN. The Event token protects `POST /api/v1/events` and
+  `POST /api/v1/ping`. The dashboard has no sign-in. The calls that change the server (Setup
+  save, new token) refuse a browser request from another site (its `Origin` or `Referer` is
+  not this server).
+
+Modules (`server/src/`):
+
+| Module | What |
+|---|---|
+| `main.rs` | The commands: `serve`, `version`, `token`, `import`, `fake`, `rollup` |
+| `config.rs` | Defaults, `config.toml`, command-line flags (a flag wins over the file) |
+| `app.rs` | Shared state, router, background jobs (each minute; daily totals and retention each hour) |
+| `api.rs` | Ingest, ping, health, token, status, flags, freezes (JSON) |
+| `store.rs` | Batch and ping into SQLite: check, de-duplicate, update clients and sessions |
+| `db.rs` | Schema, versioned migrations (`PRAGMA user_version`), settings, Event token |
+| `tz.rs` | The server time zone: days and hours, also across DST |
+| `query.rs` | Facts, aggregates, percentiles, series, flags, footer |
+| `rollup.rs` | Daily totals and retention |
+| `views.rs`, `web.rs` | The page data and the pages (`server/templates/`, `server/static/`) |
+| `import.rs`, `fake.rs` | JSONL import; synthetic data |
+
+Tables: `settings`, `clients` (key: `install_id`), `sessions` (key: `session_id`), `events`
+(unique `session_id` + `seq`; indexes on time, file, layout, script, account and client),
+`daily_totals`, `rollup_dirty`.
+
+Rules for the numbers:
+
+- The layout of a freeze is the layout after the freeze, if the plug-in read it; else the layout
+  before. "From" is the layout before. The script is the script before, else after.
+- Server wait = min(`wait_ms`, `duration_ms`). Client time = duration − server wait.
+- `script_busy` is counted on its own. It is never added to the frozen time.
+- Users are keyed on the account. The user name is the newest name for that account.
+- Freezes with no script name are one group, "No script name".
+- p50 and p95 are nearest-rank percentiles of the durations.
+- A client is connected when a ping or a batch came in the last 2 minutes (`connected_secs`).
+  A session with no `session_stop` closes when its client goes offline.
+- Days and hours use one server time zone (`--tz`, else the zone of the Mac). A DST day has 23 or
+  25 hours.
+- Compare to last week: Today compares with the same day last week, up to the same time.
+  7 days compares with the 7 days before. A custom range compares with the range of the same
+  length before it.
+- Flags only highlight. Nothing is sent. The defaults: layout p95 over 8.0 s, client quiet after
+  30 min, plug-in older than 0.1.0.
+
+Retention and daily totals:
+
+- The server keeps raw events for 30 days and daily totals for 730 days (Setup > Retention).
+- When a day with new events ends, the server writes its totals again from the raw events. One
+  totals row is one day × kind × file × layout × script × account × client.
+- Then the server deletes the raw events of the days before the cutoff. A range that starts
+  before the cutoff reads the daily totals for those days.
+- Percentiles cannot be added up. Each totals row keeps a histogram of the durations in fixed
+  buckets (`query::BUCKETS_MS`, 300 ms to 120 s). A p50 or p95 over daily totals is the upper
+  edge of the bucket that holds it, and never more than the maximum.
+- An event that comes in after its day passed the cutoff is kept for de-duplication only. It
+  does not change the totals.
 
 ## Functions
 
@@ -311,6 +379,9 @@ Scripts:
 - **macOS only.** On Windows the same design would use `GetPerTcpConnectionEStats` and a
   message-loop hook.
 - **The plug-in ID `SCFR` is not registered with Claris.**
-- **Plain HTTP only.** On the LAN, other computers can read the token and the events.
+- **Plain HTTP only.** On the LAN, other computers can read the token and the events. The
+  dashboard has no sign-in.
+- **The server trusts the `Host` header.** A web page that uses DNS rebinding can read the
+  dashboard through the browser of a user on the LAN. Use the server only on a trusted LAN.
 - **No main-thread stack sampling.** It would show *what* FileMaker was doing (drawing or
   calculating).

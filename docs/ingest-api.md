@@ -4,9 +4,10 @@ This document is the contract between the FlightRecorder plug-in (the client) an
 companion server. The Rust types of the contract are in `src/wire.rs` and `src/eventlog.rs`
 ([Shared types](#shared-types)).
 
-- The plug-in side is built: `src/sender.rs`, `src/spool.rs` and `src/http.rs`.
-- **Not built yet:** the server ([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21), [#22](https://github.com/solutionscay/fm-flight-recorder/issues/22), [#23](https://github.com/solutionscay/fm-flight-recorder/issues/23)).
-  The tests use a small local receiver (`tests/common/mod.rs`).
+- The plug-in side: `src/sender.rs`, `src/spool.rs` and `src/http.rs`.
+- The server side: `server/src/api.rs` and `server/src/store.rs` (`fr-server`).
+  The server tests post the examples of this document (`server/tests/ingest.rs`).
+- The plug-in tests use a small local receiver (`tests/common/mod.rs`).
 
 ## Summary
 
@@ -208,5 +209,19 @@ The serde types of the contract are in the plug-in crate:
 The tests in `src/wire.rs` parse the JSON examples in this document. If the document and the
 types do not agree, the tests fail.
 
-The server will be Rust, in a Cargo workspace in this repository. It will use the same types,
-so the format cannot drift ([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21)).
+The server (`server/`, a member of the Cargo workspace) uses the same types from the plug-in
+crate, so the format cannot drift.
+
+## Other server calls
+
+These calls are for the dashboard and for scripts. They need no token.
+
+| Method and path | Use |
+|---|---|
+| `GET /api/v1/status` | Listen address, clients and connected clients, last event, server time zone and its UTC offset, versions |
+| `GET /api/v1/token` | The Event token |
+| `POST /api/v1/token` | Make a new Event token. The old token gets `401` from then on. |
+| `GET /api/v1/flags?range=&file=` | The flagged layouts, clients and plug-in versions |
+| `GET /api/v1/freezes?range=&file=&layout=&account=&script=&client=&before=` | One page of freezes (100), with the link to the next page |
+
+`range` is `today`, `7d`, or `custom` with `from=YYYY-MM-DD&to=YYYY-MM-DD`.
