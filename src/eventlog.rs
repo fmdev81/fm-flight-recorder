@@ -110,9 +110,15 @@ impl LogWriter {
         &self.dir
     }
 
-    /// One file per day: flight-YYYY-MM-DD.jsonl
+    /// One file per local day: flight-YYYY-MM-DD.jsonl. The date is the
+    /// local date, so a work day stays in one file. The `ts` in each record
+    /// stays UTC.
     pub fn path_for_now(&self) -> PathBuf {
-        let date = &iso_now()[..10];
+        self.path_for(unix_ms_now())
+    }
+
+    pub fn path_for(&self, unix_ms: i64) -> PathBuf {
+        let date = local_date(unix_ms);
         self.dir.join(format!("flight-{date}.jsonl"))
     }
 
@@ -156,6 +162,32 @@ pub fn iso_from_unix_ms(ms: i64) -> String {
     )
 }
 
+/// Local calendar date (YYYY-MM-DD) of a Unix time in ms.
+pub fn local_date(unix_ms: i64) -> String {
+    date_with_offset(unix_ms, local_utc_offset_secs(unix_ms.div_euclid(1000)))
+}
+
+/// Calendar date of `unix_ms` in a zone `offset_secs` east of UTC.
+fn date_with_offset(unix_ms: i64, offset_secs: i64) -> String {
+    iso_from_unix_ms(unix_ms + offset_secs * 1000)[..10].to_string()
+}
+
+/// Local UTC offset in seconds (east positive) at `secs`, from localtime_r.
+/// Falls back to 0 (UTC) if localtime_r fails.
+fn local_utc_offset_secs(secs: i64) -> i64 {
+    let t = secs as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: both pointers point to valid, owned values for the call.
+    let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
+    if ok {
+        // c_long is i32 on 32-bit targets.
+        #[allow(clippy::useless_conversion)]
+        i64::from(tm.tm_gmtoff)
+    } else {
+        0
+    }
+}
+
 /// Howard Hinnant's days -> civil date algorithm.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
@@ -185,6 +217,46 @@ mod tests {
             iso_from_unix_ms(951_782_400_000),
             "2000-02-29T00:00:00.000Z"
         );
+    }
+
+    #[test]
+    fn file_day_uses_offset() {
+        // 2025-11-09T05:30:00Z: still Nov 8 in Chicago (UTC-6), Nov 9 in UTC.
+        let ms = 1_762_666_200_000;
+        assert_eq!(iso_from_unix_ms(ms), "2025-11-09T05:30:00.000Z");
+        assert_eq!(date_with_offset(ms, 0), "2025-11-09");
+        assert_eq!(date_with_offset(ms, -6 * 3600), "2025-11-08");
+        assert_eq!(date_with_offset(ms, 9 * 3600), "2025-11-09");
+        // Chicago 23:59:59.999 -> Nov 8; one ms later -> Nov 9.
+        let midnight_chicago = 1_762_668_000_000; // 2025-11-09T06:00:00Z
+        assert_eq!(
+            date_with_offset(midnight_chicago - 1, -6 * 3600),
+            "2025-11-08"
+        );
+        assert_eq!(date_with_offset(midnight_chicago, -6 * 3600), "2025-11-09");
+    }
+
+    #[test]
+    fn file_day_rolls_over_at_local_midnight() {
+        let dir = std::env::temp_dir().join(format!("fr-roll-{}", std::process::id()));
+        let w = LogWriter::new(&dir);
+        // Find the next local midnight from now with the real local offset.
+        let now = unix_ms_now();
+        let off_ms = local_utc_offset_secs(now / 1000) * 1000;
+        let local_ms = now + off_ms;
+        let local_midnight = (local_ms.div_euclid(86_400_000) + 1) * 86_400_000;
+        // Use the offset that applies at midnight (DST may change before it).
+        let guess = local_midnight - off_ms;
+        let next_local_midnight = local_midnight - local_utc_offset_secs(guess / 1000) * 1000;
+        let before = w.path_for(next_local_midnight - 1);
+        let after = w.path_for(next_local_midnight);
+        assert_ne!(before, after, "file must change at local midnight");
+        assert_eq!(
+            before.file_name().unwrap().to_string_lossy(),
+            format!("flight-{}.jsonl", local_date(now))
+        );
+        // One hour before local midnight is still the same file.
+        assert_eq!(w.path_for(next_local_midnight - 3_600_000), before);
     }
 
     #[test]

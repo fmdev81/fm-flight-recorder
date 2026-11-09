@@ -68,6 +68,9 @@ The plug-in writes one log file each day to this folder:
 `~/Library/Logs/FlightRecorder/`
 
 The file name is `flight-YYYY-MM-DD.jsonl`.
+The date in the file name is the local date of the Mac.
+A new file starts at local midnight.
+The time (`ts`) in each record is UTC.
 Each line is one JSON record.
 
 To see a summary of the log, run `python3 scripts/summary.py`.
