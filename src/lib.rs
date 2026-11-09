@@ -2,7 +2,7 @@
 //!
 //! Records client-side freezes in FileMaker Pro: when, how long, where
 //! (file, layout, script, account) and how many round trips to FileMaker
-//! Server happened during the freeze. See README.md and docs/sdk-notes.md.
+//! Server happened during the freeze. See docs/design.md and docs/sdk-notes.md.
 //!
 //! The core (everything except `fmx`) has no FileMaker dependency and is
 //! tested with `cargo test`. The FileMaker glue is behind the `fmx` feature.

@@ -20,12 +20,14 @@ This plug-in records those.
 16:45:01  froze 2.0 s on Customers | List, 1 round trip, 2.0 s waiting on server
 ```
 
-Status: **prototype, not yet run inside FileMaker Pro.**
+Status: **prototype.**
 - What is done:
   - The core is unit-tested and end-to-end tested with real sockets and a real macOS run loop.
   - The plug-in links against the official Claris SDK 26.0.3 `FMWrapper.framework`.
   - The ABI is checked against the SDK headers.
-- What is not done: loading it in FileMaker is the first step of the test plan below.
+  - The plug-in loads in FileMaker Pro 26.0.3 on macOS.
+  - The plug-in records freezes in FileMaker Pro 26.0.3 on macOS.
+- What is not done: a test with a file on FileMaker Server (the test plan below).
 
 Research, sources and the three feasibility answers: [docs/sdk-notes.md](sdk-notes.md).
 
