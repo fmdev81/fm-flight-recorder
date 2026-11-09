@@ -200,6 +200,8 @@ If FileMaker does not list the plug-in, check:
 
 ### Log format (`~/Library/Logs/FlightRecorder/flight-YYYY-MM-DD.jsonl`, schema `v: 1`)
 
+The file date is the local date of the Mac, so a new file starts at local midnight. All `ts` and `end_ts` values are UTC.
+
 ```json
 {"v":1,"type":"freeze","ts":"2026-11-08T16:45:01.012Z","end_ts":"2026-11-08T16:45:03.013Z","duration_ms":2001,
  "level":"user_not_idle",
