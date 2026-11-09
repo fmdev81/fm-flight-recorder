@@ -54,7 +54,8 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
     stays in the queue until the server accepts it (`200`), or refuses it (`400`/`413`:
     dropped and counted). `401` stops sending until the next `FlightRecorder_Start`.
   - **Offline spool.** When a post fails (no server, timeout, `5xx`), the batch goes to
-    `<log folder>/spool/`, one file for each batch (the exact request body). The next try
+    `<log folder>/spool/<endpoint key>/`, one file for each batch (the exact request body).
+    Each endpoint has its own folder: a batch is only sent to the server it was made for. The next try
     waits 1 s, then 2 s, 4 s … up to 5 min; a success resets it. While the server is away, new
     batches go straight to the spool, so memory stays small. The spool is always sent before
     newer events, also after a restart (a resend is safe: the server drops known

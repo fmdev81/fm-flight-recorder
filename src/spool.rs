@@ -1,5 +1,8 @@
 //! Offline spool: batches that could not be sent, one file per batch, in
-//! `<log dir>/spool/`. Used only by the sender and writer threads.
+//! `<log dir>/spool/<endpoint key>/`. Used only by the sender and writer
+//! threads. Each endpoint has its own folder, so a batch is never sent to
+//! a server other than the one it was made for (the old folder stays if
+//! the endpoint changes).
 //!
 //! Each file is the exact request body of `POST /api/v1/events`, with the
 //! session id and client of the session that made it. File names sort by

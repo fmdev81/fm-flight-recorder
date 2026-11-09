@@ -52,6 +52,18 @@ fn wait(max: Duration, f: impl Fn() -> bool) -> bool {
     f()
 }
 
+/// The one endpoint folder under `<dir>/spool/`.
+fn spool_dir(dir: &Path) -> PathBuf {
+    let mut v: Vec<_> = dir
+        .join("spool")
+        .read_dir()
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(v.len(), 1, "{v:?}");
+    v.pop().unwrap()
+}
+
 /// A free port with the receiver stopped: (port, state for the restart).
 fn down_receiver() -> (u16, std::sync::Arc<common::RState>) {
     Receiver::start(0).stop()
@@ -73,7 +85,7 @@ fn server_down_then_up_all_events_arrive_once() {
     );
     assert_eq!(s.stats.sent.load(Relaxed), 0);
     assert!(s.stats.failures.load(Relaxed) >= 1);
-    assert!(dir.join("spool").read_dir().unwrap().count() >= 1);
+    assert!(spool_dir(&dir).read_dir().unwrap().count() >= 1);
 
     // The server comes back on the same port.
     let srv = Receiver::start_with(port, state);
@@ -189,8 +201,7 @@ fn spool_cap_drops_the_oldest_events() {
         101,
         "spooled {spooled} dropped {dropped}"
     );
-    let bytes: u64 = dir
-        .join("spool")
+    let bytes: u64 = spool_dir(&dir)
         .read_dir()
         .unwrap()
         .map(|e| e.unwrap().metadata().unwrap().len())
@@ -207,5 +218,52 @@ fn spool_cap_drops_the_oldest_events() {
     assert_eq!(*seqs.last().unwrap(), 101);
     assert!(seqs[0] > 1);
     rec.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn spool_is_only_sent_to_its_own_endpoint() {
+    let (port_a, state_a) = down_receiver();
+    let dir = tmp("perendpoint");
+    let mut ca = cfg(&dir, port_a);
+    ca.send_interval_ms = 60_000;
+    let a = Recorder::start(ca, Box::new(fm_flight_recorder::net::NoProbe));
+    marks(&a, 2);
+    a.stop();
+    let sid_a = a.session_id().to_string();
+    assert_eq!(a.sender().unwrap().stats.spooled.load(Relaxed), 4);
+
+    // The endpoint changes to server B: B must not get A's spool.
+    let srv_b = Receiver::start(0);
+    let b = Recorder::start(
+        cfg(&dir, srv_b.port),
+        Box::new(fm_flight_recorder::net::NoProbe),
+    );
+    assert!(srv_b
+        .state
+        .wait_for(Duration::from_secs(3), |s| s.seqs().contains(&1)));
+    thread::sleep(Duration::from_millis(300));
+    assert!(srv_b
+        .state
+        .batches
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|x| x.session_id != sid_a));
+    b.stop();
+
+    // Back to endpoint A, now up: A's spool arrives there.
+    let srv_a = Receiver::start_with(port_a, state_a);
+    let c = Recorder::start(
+        cfg(&dir, port_a),
+        Box::new(fm_flight_recorder::net::NoProbe),
+    );
+    assert!(srv_a.state.wait_for(Duration::from_secs(3), |s| s
+        .batches
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|x| x.session_id == sid_a && x.events.len() == 4)));
+    c.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
