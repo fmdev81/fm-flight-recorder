@@ -127,6 +127,7 @@ fn queue_is_bounded_when_the_server_is_down() {
     let dir = tmp("bounded");
     let mut c = cfg(&dir, &format!("http://127.0.0.1:{}", closed_port()));
     c.send_queue_max = 10;
+    c.send_spool_max_bytes = 0; // no spool: unsent events wait in memory
     let rec = Recorder::start(c, Box::new(fm_flight_recorder::net::NoProbe));
     marks(&rec, 50);
     thread::sleep(Duration::from_millis(300));
@@ -169,8 +170,9 @@ fn stop_and_marks_do_not_wait_for_a_hanging_server() {
     assert!(took < Duration::from_millis(150), "stop took {took:?}");
     let s = rec.sender().unwrap();
     assert_eq!(s.stats.sent.load(Relaxed), 0);
-    // 1 start + 1 + 200 marks + stop, none sent: all counted as not sent.
-    assert_eq!(s.stats.dropped.load(Relaxed), 203);
+    // 1 start + 1 + 200 marks + stop, none sent: all in the spool.
+    assert_eq!(s.stats.dropped.load(Relaxed), 0);
+    assert_eq!(s.stats.spooled.load(Relaxed), 203);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

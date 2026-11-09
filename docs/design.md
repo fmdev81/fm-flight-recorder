@@ -54,12 +54,19 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
   - `fr-sender` posts a batch at 200 events, or 5 s after the first waiting event. Connect
     timeout 1 s, read/write timeout 3 s, one plain-HTTP connection for each post. A batch
     stays in the queue until the server accepts it (`200`), or refuses it (`400`/`413`:
-    dropped and counted). Other failures are tried again after 1 s. `401` stops sending
-    until the next `FlightRecorder_Start`.
+    dropped and counted). `401` stops sending until the next `FlightRecorder_Start`.
+  - **Offline spool.** When a post fails (no server, timeout, `5xx`), the batch goes to
+    `<log folder>/spool/<endpoint key>/`, one file for each batch (the exact request body).
+    Each endpoint has its own folder: a batch is only sent to the server it was made for. The next try
+    waits 1 s, then 2 s, 4 s … up to 5 min; a success resets it. While the server is away, new
+    batches go straight to the spool, so memory stays small. The spool is always sent before
+    newer events, also after a restart (a resend is safe: the server drops known
+    `session_id` + `seq`). The spool has a 20 MiB cap; when it is full, the oldest files are
+    deleted and their events counted as dropped.
   - **Stop never waits for the network.** `FlightRecorder_Stop` and `kFMXT_Shutdown` close the
     sender's socket, so a blocked read or write ends at once. They wait at most 20 ms for the
     thread; if it is still in `connect`, they detach it and it ends at its connect timeout.
-    Events not sent at stop stay in the log only.
+    The writer thread puts the events not sent at stop in the spool (local disk only).
 
 - **Freeze.** The main run loop is awake and has not come back for at least `threshold` ms
   (default 250). If the run loop is asleep, FileMaker is idle, not frozen.
@@ -82,6 +89,7 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `src/eventlog.rs` | JSONL schema and writer |
 | `src/recorder.rs` | Threads, the main-thread API, options |
 | `src/sender.rs`, `src/http.rs` | Send queue and `fr-sender` thread; a small HTTP/1.1 client (std only) |
+| `src/spool.rs` | Offline spool of unsent batches (`<log folder>/spool/`) |
 | `src/wire.rs` | Wire types of the ingest API ([ingest-api.md](ingest-api.md)) |
 | `src/identity.rs` | Install id (kept in `~/Library/Application Support/FlightRecorder/install-id`), session id, computer name, OS version |
 | `src/runloop.rs` | `CFRunLoopObserver` heartbeat (plus timer helpers for the simulator) |

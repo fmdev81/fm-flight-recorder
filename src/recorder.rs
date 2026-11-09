@@ -113,8 +113,11 @@ pub struct Config {
     pub send_connect_ms: u64,
     /// Read/write timeout of one post.
     pub send_io_ms: u64,
-    /// Wait after a failed post.
+    /// Wait after the first failed post; it doubles up to `send_retry_max_ms`.
     pub send_retry_ms: u64,
+    pub send_retry_max_ms: u64,
+    /// Size cap of the offline spool (`<log_dir>/spool/`); 0 = no spool.
+    pub send_spool_max_bytes: u64,
 }
 
 /// Events waiting for the writer thread. Full = lost and counted.
@@ -194,6 +197,23 @@ impl Endpoint {
     pub fn url(&self) -> String {
         format!("http://{}{}", self.authority(), self.base)
     }
+
+    /// 16 hex characters that name this endpoint's spool folder
+    /// (FNV-1a 64 of the URL with the host in lower case).
+    pub fn spool_key(&self) -> String {
+        let text = format!(
+            "http://{}:{}{}",
+            self.host.to_ascii_lowercase(),
+            self.port,
+            self.base
+        );
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in text.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{h:016x}")
+    }
 }
 
 impl Default for Config {
@@ -219,6 +239,8 @@ impl Default for Config {
             send_connect_ms: 1000,
             send_io_ms: 3000,
             send_retry_ms: 1000,
+            send_retry_max_ms: 300_000,
+            send_spool_max_bytes: 20 << 20,
         }
     }
 }
@@ -442,6 +464,7 @@ impl Recorder {
         let client_info = Arc::new(OnceLock::new());
         let last_seq = Arc::new(AtomicU64::new(0));
         let sender = cfg.endpoint.clone().map(|endpoint| {
+            let spool_key = endpoint.spool_key();
             Arc::new(crate::sender::Sender::start(
                 crate::sender::SendSettings {
                     endpoint,
@@ -455,6 +478,11 @@ impl Recorder {
                         io: Duration::from_millis(cfg.send_io_ms),
                     },
                     retry: Duration::from_millis(cfg.send_retry_ms),
+                    retry_max: Duration::from_millis(cfg.send_retry_max_ms),
+                    // One folder for each endpoint: a batch is only ever sent
+                    // to the server it was made for.
+                    spool_dir: Some(cfg.log_dir.join("spool").join(spool_key)),
+                    spool_max_bytes: cfg.send_spool_max_bytes,
                 },
                 session_id.clone(),
                 client_info.clone(),
@@ -720,7 +748,8 @@ impl Recorder {
             idle_messages: self.shared.idle_msgs.load(Relaxed),
         });
         // The sender must not post any more: no network work at stop. Its
-        // socket is closed now; the writer hands the unsent events over.
+        // socket is closed now; the writer puts the unsent events in the
+        // spool (local disk, like the log).
         let t0 = Instant::now();
         if let Some(s) = &self.sender {
             s.signal_stop();
@@ -791,14 +820,10 @@ impl WriterThread {
                 }
             }
         }
-        // Stop: the events that were not sent stay in the JSONL log only.
+        // Stop: the events that were not sent go to the spool, and are sent
+        // first at the next start.
         if let Some(s) = &self.sender {
-            let left = s.queue.close();
-            if !left.is_empty() {
-                s.stats.dropped.fetch_add(left.len() as u64, Relaxed);
-                s.stats
-                    .set_error(format!("{} events not sent at stop", left.len()));
-            }
+            s.spool_rest(s.queue.close());
         }
     }
 }
@@ -1021,6 +1046,16 @@ mod tests {
         let mut c = Config::default();
         assert!(c.apply_options("token=t; endpoint=").errors.is_empty());
         assert!(c.endpoint.is_none());
+    }
+
+    #[test]
+    fn spool_key_is_per_endpoint() {
+        let a = Endpoint::parse("http://FR.local:8787").unwrap();
+        let b = Endpoint::parse("http://fr.local:8787/").unwrap();
+        let c = Endpoint::parse("http://fr.local:8788").unwrap();
+        assert_eq!(a.spool_key(), b.spool_key());
+        assert_ne!(a.spool_key(), c.spool_key());
+        assert_eq!(a.spool_key().len(), 16);
     }
 
     #[test]
