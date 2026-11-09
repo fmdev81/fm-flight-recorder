@@ -41,7 +41,8 @@ safe idle, ≤ every 250 ms:                  fr-net: every 2 ms getsockopt(TCP_
 FlightRecorder_Mark(label) ──► mark           round trips + request→reply wait
                                             fr-writer: seq + JSONL → ~/Library/Logs/FlightRecorder/
                                               then (with endpoint=) the send queue
-                                            fr-sender: batches → POST /api/v1/events
+                                            fr-sender: batches → POST /api/v1/events,
+                                              ping every 60 s → POST /api/v1/ping
 ```
 
 - **Sending.** Only with `endpoint=` and `token=` ([ingest-api.md](ingest-api.md)). The JSONL log
@@ -61,6 +62,10 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
     newer events, also after a restart (a resend is safe: the server drops known
     `session_id` + `seq`). The spool has a 20 MiB cap; when it is full, the oldest files are
     deleted and their events counted as dropped.
+  - **Ping.** Every 60 s the sender posts `/api/v1/ping` with the `Status` counters
+    (heartbeats, idle messages, freezes) and the last `seq`, so the server can tell a quiet
+    client from a client that is gone. A failed ping is not kept; the next one replaces it.
+    A ping that succeeds while the sender waits after a failure ends the wait.
   - **Stop never waits for the network.** `FlightRecorder_Stop` and `kFMXT_Shutdown` close the
     sender's socket, so a blocked read or write ends at once. They wait at most 20 ms for the
     thread; if it is still in `connect`, they detach it and it ends at its connect timeout.
