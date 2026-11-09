@@ -367,6 +367,9 @@ struct Shared {
     stall_since_ns: AtomicU64,
     /// Events lost because the writer channel was full.
     events_lost: AtomicU64,
+    /// Failed disk writes of the writer thread (log lines, install id).
+    write_errors: AtomicU64,
+    last_write_error: Mutex<String>,
 }
 
 struct Pending {
@@ -419,7 +422,42 @@ pub struct Status {
     pub session_id: String,
     /// `seq` of the last event written.
     pub last_seq: u64,
+    /// Events lost because the writer thread could not keep up.
+    pub events_lost: u64,
+    /// Failed disk writes (log lines, install id), and the last error.
+    pub write_errors: u64,
+    pub last_write_error: String,
+    // Sending (all 0 or empty without an endpoint).
+    /// Events in memory waiting to be sent.
+    pub queued: u64,
+    /// Events the server accepted.
+    pub sent: u64,
+    /// Events dropped: queue full, spool full, or refused by the server.
+    pub dropped: u64,
+    /// Events in the offline spool.
+    pub spooled: u64,
+    /// Events the server already had (resends).
+    pub duplicates: u64,
+    /// Failed posts (network error, timeout, 401, 5xx).
+    pub send_failures: u64,
+    /// Time of the last accepted batch, UTC ISO-8601, empty = never.
+    pub last_send: String,
+    /// The server answered 401: nothing is sent until the next start.
+    pub auth_failed: bool,
+    pub pings: u64,
+    /// Time of the last accepted ping, empty = never.
+    pub last_ping: String,
+    /// The last send or ping error, empty if none.
+    pub last_send_error: String,
     pub last_context: Context,
+}
+
+fn iso_or_empty(unix_ms: i64) -> String {
+    if unix_ms > 0 {
+        iso_from_unix_ms(unix_ms)
+    } else {
+        String::new()
+    }
 }
 
 pub struct Recorder {
@@ -451,6 +489,8 @@ impl Recorder {
             want_context: AtomicBool::new(true),
             stall_since_ns: AtomicU64::new(0),
             events_lost: AtomicU64::new(0),
+            write_errors: AtomicU64::new(0),
+            last_write_error: Mutex::new(String::new()),
         });
         let inner = Arc::new(Mutex::new(Inner {
             last_context: Context::default(),
@@ -512,6 +552,7 @@ impl Recorder {
                 client_info: client_info.clone(),
                 last_seq: last_seq.clone(),
                 sender: sender.clone(),
+                shared: shared.clone(),
             };
             threads.push(
                 thread::Builder::new()
@@ -692,8 +733,11 @@ impl Recorder {
         });
     }
 
+    /// Atomics and short locks only (never a lock held during I/O), so
+    /// FlightRecorder_Status is safe on the main thread.
     pub fn status(&self) -> Status {
         let since = self.shared.stall_since_ns.load(Acquire);
+        let send = self.sender().map(|s| &*s.stats);
         Status {
             running: self.shared.running.load(Relaxed),
             heartbeats: self.shared.beats.load(Relaxed),
@@ -719,6 +763,22 @@ impl Recorder {
                 .unwrap_or_else(|| self.cfg.client.clone()),
             session_id: self.session_id.clone(),
             last_seq: self.last_seq.load(Relaxed),
+            events_lost: self.shared.events_lost.load(Relaxed),
+            write_errors: self.shared.write_errors.load(Relaxed),
+            last_write_error: self.shared.last_write_error.lock().unwrap().clone(),
+            queued: self.sender().map_or(0, |s| s.queue.len() as u64),
+            sent: send.map_or(0, |s| s.sent.load(Relaxed)),
+            dropped: send.map_or(0, |s| s.dropped.load(Relaxed)),
+            spooled: send.map_or(0, |s| s.spooled.load(Relaxed)),
+            duplicates: send.map_or(0, |s| s.duplicates.load(Relaxed)),
+            send_failures: send.map_or(0, |s| s.failures.load(Relaxed)),
+            last_send: iso_or_empty(send.map_or(0, |s| s.last_send_unix_ms.load(Relaxed))),
+            auth_failed: send.is_some_and(|s| s.auth_failed.load(Relaxed)),
+            pings: send.map_or(0, |s| s.pings.load(Relaxed)),
+            last_ping: iso_or_empty(send.map_or(0, |s| s.last_ping_unix_ms.load(Relaxed))),
+            last_send_error: send
+                .map(|s| s.last_error.lock().unwrap().clone())
+                .unwrap_or_default(),
             last_context: self
                 .inner
                 .lock()
@@ -796,11 +856,20 @@ struct WriterThread {
     client_info: Arc<OnceLock<ClientInfo>>,
     last_seq: Arc<AtomicU64>,
     sender: Option<Arc<crate::sender::Sender>>,
+    shared: Arc<Shared>,
 }
 
 impl WriterThread {
+    fn write_failed(&self, e: String) {
+        self.shared.write_errors.fetch_add(1, Relaxed);
+        *self.shared.last_write_error.lock().unwrap() = e;
+    }
+
     fn run(self, rx: Receiver<Event>) {
-        let (info, _id_err) = crate::identity::resolve(&self.state_dir, &self.client, &self.app);
+        let (info, id_err) = crate::identity::resolve(&self.state_dir, &self.client, &self.app);
+        if let Some(e) = id_err {
+            self.write_failed(e);
+        }
         let info = self.client_info.get_or_init(|| info).clone();
         let mut seq = 0u64;
         for mut event in rx {
@@ -825,7 +894,9 @@ impl WriterThread {
                 event,
             };
             let text = serde_json::to_string(&line).expect("event serializes");
-            let _ = self.writer.write_str(&text);
+            if let Err(e) = self.writer.write_str(&text) {
+                self.write_failed(format!("log {}: {e}", self.writer.dir().display()));
+            }
             self.last_seq.store(seq, Relaxed);
             if let Some(s) = &self.sender {
                 let dropped = s.queue.push(seq, text);
@@ -1105,6 +1176,54 @@ mod tests {
         assert!(json.contains("\"client\":\"Desk 4\""), "{json}");
         assert!(!json.contains("secret-token"), "{json}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn status_shows_write_errors() {
+        let base = std::env::temp_dir().join(format!("fr-werr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        // A file where the log folder should be: every log write fails.
+        let not_a_dir = base.join("file");
+        std::fs::write(&not_a_dir, "x").unwrap();
+        let rec = Recorder::start(
+            Config {
+                log_dir: not_a_dir,
+                state_dir: base.join("state"),
+                net_port: None,
+                ..Default::default()
+            },
+            Box::new(crate::net::NoProbe),
+        );
+        rec.mark("a", Context::default());
+        let st = rec.stop();
+        assert_eq!(st.write_errors, 3, "{st:?}");
+        assert!(
+            st.last_write_error.starts_with("log "),
+            "{}",
+            st.last_write_error
+        );
+        assert_eq!((st.sent, st.queued, st.last_send.as_str()), (0, 0, ""));
+        let json = serde_json::to_value(&st).unwrap();
+        for k in [
+            "write_errors",
+            "last_write_error",
+            "events_lost",
+            "endpoint",
+            "queued",
+            "sent",
+            "dropped",
+            "spooled",
+            "last_send",
+            "last_send_error",
+            "send_failures",
+            "auth_failed",
+            "pings",
+            "last_ping",
+        ] {
+            assert!(json.get(k).is_some(), "no {k} in {json}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn read_lines(dir: &std::path::Path) -> Vec<EventLine> {
