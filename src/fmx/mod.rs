@@ -148,14 +148,20 @@ fn capture_current() -> Option<Context> {
 
 // ---------- recorder lifecycle ----------
 
+/// Returns the log path (plus "ignored: …" for unknown options), or
+/// "error: …" when the options are bad. On error the running recorder is
+/// not touched.
 fn start(options: &str) -> String {
+    let mut cfg = Config::default();
+    let report = cfg.apply_options(options);
+    if !report.errors.is_empty() {
+        return report.error_result();
+    }
     let mut st = STATE.lock().unwrap();
     if let Some(old) = st.take() {
         drop(old.observer);
         old.rec.stop();
     }
-    let mut cfg = Config::default();
-    cfg.apply_options(options);
     cfg.app = APP_VERSION.lock().unwrap().clone();
     cfg.heartbeat = "idle+runloop".into();
     let rec = Arc::new(Recorder::start(
@@ -169,7 +175,7 @@ fn start(options: &str) -> String {
     };
     let path = rec.log_path().display().to_string();
     *st = Some(State { rec, observer });
-    path
+    report.start_result(&path)
 }
 
 fn stop() -> String {

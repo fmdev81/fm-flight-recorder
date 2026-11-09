@@ -193,10 +193,10 @@ If FileMaker does not list the plug-in, check:
 | Function | Result |
 |---|---|
 | `FlightRecorder_Version` | Plug-in version |
-| `FlightRecorder_Start ( { options } )` | (Re)starts recording; returns the log path. Options: `threshold=250; port=5003; sample_ms=2; context_ms=250; scripts=0; dir=/path`. `port=0` turns off the round-trip counter. Use `port=443` if HTTPS tunnelling is on. |
+| `FlightRecorder_Start ( { options } )` | (Re)starts recording; returns the log path. Options: `threshold=250; port=5003; sample_ms=2; context_ms=250; scripts=0; dir=/path; endpoint=http://host:8787; token=…; client=name`. `port=0` turns off the round-trip counter. Use `port=443` if HTTPS tunnelling is on. `endpoint` and `token` send the events to the companion server ([ingest-api.md](ingest-api.md)); `endpoint` needs `token` and must be `http://`. `client` overrides the client name (default: the macOS computer name). Unknown keys and bad values are listed on a second line of the result, `ignored: foo, port=abc`. A bad `endpoint` or a missing `token` returns `error: …` and leaves the recorder as it was. |
 | `FlightRecorder_Stop` | Stops recording; returns `stopped: N freezes, …` |
 | `FlightRecorder_Mark ( label )` | Writes a mark with the calling script's context. Marks within 1 s before a freeze are attached to it. A Mark is not a heartbeat. |
-| `FlightRecorder_Status` | JSON: running, heartbeats, freezes, current freeze length, last context, log path |
+| `FlightRecorder_Status` | JSON: running, heartbeats, freezes, current freeze length, last context, log path, endpoint, client (never the token) |
 | `FlightRecorder_SimulateFreeze ( ms )` | Blocks the main thread for up to 10 000 ms. For testing only. |
 
 ### Log format (`~/Library/Logs/FlightRecorder/flight-YYYY-MM-DD.jsonl`, schema `v: 1`)

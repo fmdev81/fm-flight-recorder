@@ -88,6 +88,86 @@ pub struct Config {
     pub app: String,
     /// How long a freeze waits for its "after" context before it is written.
     pub after_wait_ms: u64,
+    /// Companion server (`endpoint=http://host:8787`). None = do not send.
+    pub endpoint: Option<Endpoint>,
+    /// Event token (`token=`). Never shown in Status.
+    pub token: String,
+    /// Client name (`client=`). Empty = the macOS computer name.
+    pub client: String,
+}
+
+/// A parsed `endpoint=` value. Plain HTTP only (#7); HTTPS is #55.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoint {
+    pub host: String,
+    pub port: u16,
+    /// Path prefix without a trailing '/', usually empty.
+    pub base: String,
+}
+
+impl Endpoint {
+    pub fn parse(text: &str) -> Result<Endpoint, String> {
+        let t = text.trim();
+        let lower = t.to_ascii_lowercase();
+        if lower.starts_with("https://") {
+            return Err(format!(
+                "endpoint {t}: https is not supported yet, use http://"
+            ));
+        }
+        if !lower.starts_with("http://") {
+            return Err(format!("endpoint {t}: must start with http://"));
+        }
+        let rest = &t["http://".len()..];
+        let (authority, path) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        let (host, port) = if let Some(h) = authority.strip_prefix('[') {
+            // [IPv6]:port
+            let (h, after) = h
+                .split_once(']')
+                .ok_or_else(|| format!("endpoint {t}: bad host"))?;
+            (h, after.strip_prefix(':'))
+        } else {
+            match authority.rsplit_once(':') {
+                Some((h, p)) => (h, Some(p)),
+                None => (authority, None),
+            }
+        };
+        if host.is_empty() || host.contains(['@', ' ']) {
+            return Err(format!("endpoint {t}: bad host"));
+        }
+        let port = match port {
+            None => 80,
+            Some(p) => p
+                .parse::<u16>()
+                .ok()
+                .filter(|&p| p != 0)
+                .ok_or_else(|| format!("endpoint {t}: bad port"))?,
+        };
+        if path.contains(['?', '#']) {
+            return Err(format!("endpoint {t}: no query or fragment allowed"));
+        }
+        Ok(Endpoint {
+            host: host.to_string(),
+            port,
+            base: path.trim_end_matches('/').to_string(),
+        })
+    }
+
+    /// "host:port" for TcpStream and the Host header.
+    pub fn authority(&self) -> String {
+        if self.host.contains(':') {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
+
+    /// The endpoint as text, for Status.
+    pub fn url(&self) -> String {
+        format!("http://{}{}", self.authority(), self.base)
+    }
 }
 
 impl Default for Config {
@@ -103,45 +183,114 @@ impl Default for Config {
             heartbeat: "idle".into(),
             app: String::new(),
             after_wait_ms: 1500,
+            endpoint: None,
+            token: String::new(),
+            client: String::new(),
         }
     }
 }
 
+/// What [`Config::apply_options`] could not use.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OptionReport {
+    /// Unknown keys, and known keys with a value that is not valid
+    /// (as "key=value"). The rest of the options still apply.
+    pub ignored: Vec<String>,
+    /// Problems that must stop FlightRecorder_Start (bad endpoint, no token).
+    pub errors: Vec<String>,
+}
+
+impl OptionReport {
+    /// The text that FlightRecorder_Start returns when the options are good:
+    /// the log path, then "ignored: a, b" on a second line if needed.
+    pub fn start_result(&self, log_path: &str) -> String {
+        if self.ignored.is_empty() {
+            log_path.to_string()
+        } else {
+            format!("{log_path}\nignored: {}", self.ignored.join(", "))
+        }
+    }
+
+    /// The text that FlightRecorder_Start returns on errors.
+    pub fn error_result(&self) -> String {
+        format!("error: {}", self.errors.join("; "))
+    }
+}
+
 impl Config {
-    /// Parse "threshold=250;port=5003;scripts=1;dir=/path" (FlightRecorder_Start option text).
-    /// Unknown keys are ignored. `port=0` disables the round-trip counter.
-    pub fn apply_options(&mut self, text: &str) {
+    /// Parse "threshold=250;port=5003;scripts=1;dir=/path;endpoint=http://h:8787;token=…"
+    /// (FlightRecorder_Start option text). `port=0` disables the round-trip
+    /// counter. Unknown keys and bad values are reported, not applied.
+    pub fn apply_options(&mut self, text: &str) -> OptionReport {
+        let mut rep = OptionReport::default();
         for part in text.split([';', '\n', '\r', ',']) {
+            if part.trim().is_empty() {
+                continue;
+            }
             let Some((k, v)) = part.split_once('=') else {
+                rep.ignored.push(part.trim().to_string());
                 continue;
             };
             let (k, v) = (k.trim().to_ascii_lowercase(), v.trim());
-            match k.as_str() {
-                "threshold" | "threshold_ms" => {
-                    if let Ok(n) = v.parse::<u64>() {
-                        self.threshold_ms = n.clamp(20, 600_000);
-                    }
+            let ok = match k.as_str() {
+                "threshold" | "threshold_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.threshold_ms = n.clamp(20, 600_000))
+                    .is_ok(),
+                "port" => v
+                    .parse::<u16>()
+                    .map(|n| self.net_port = (n != 0).then_some(n))
+                    .is_ok(),
+                "sample_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.net_sample_ms = n.clamp(1, 1000))
+                    .is_ok(),
+                "context_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.context_interval_ms = n.clamp(0, 60_000))
+                    .is_ok(),
+                "scripts" => {
+                    self.context_during_scripts = matches!(v, "1" | "true" | "yes");
+                    true
                 }
-                "port" => {
-                    if let Ok(n) = v.parse::<u16>() {
-                        self.net_port = (n != 0).then_some(n);
+                "dir" => {
+                    if !v.is_empty() {
+                        self.log_dir = PathBuf::from(v);
                     }
+                    true
                 }
-                "sample_ms" => {
-                    if let Ok(n) = v.parse::<u64>() {
-                        self.net_sample_ms = n.clamp(1, 1000);
+                "endpoint" => {
+                    if v.is_empty() {
+                        self.endpoint = None;
+                    } else {
+                        match Endpoint::parse(v) {
+                            Ok(e) => self.endpoint = Some(e),
+                            Err(e) => rep.errors.push(e),
+                        }
                     }
+                    true
                 }
-                "context_ms" => {
-                    if let Ok(n) = v.parse::<u64>() {
-                        self.context_interval_ms = n.clamp(0, 60_000);
-                    }
+                "token" => {
+                    self.token = v.to_string();
+                    true
                 }
-                "scripts" => self.context_during_scripts = matches!(v, "1" | "true" | "yes"),
-                "dir" if !v.is_empty() => self.log_dir = PathBuf::from(v),
-                _ => {}
+                "client" => {
+                    self.client = v.chars().take(100).collect();
+                    true
+                }
+                _ => {
+                    rep.ignored.push(k);
+                    continue;
+                }
+            };
+            if !ok {
+                rep.ignored.push(format!("{k}={v}"));
             }
         }
+        if self.endpoint.is_some() && self.token.is_empty() {
+            rep.errors.push("token is required with endpoint".into());
+        }
+        rep
     }
 }
 
@@ -200,6 +349,10 @@ pub struct Status {
     pub threshold_ms: u64,
     pub in_freeze_ms: u64,
     pub log: String,
+    /// The companion server, empty if not set. The token is never shown.
+    pub endpoint: String,
+    /// The `client=` option, empty if not set.
+    pub client: String,
     pub last_context: Context,
 }
 
@@ -407,6 +560,13 @@ impl Recorder {
                 (mono_ns() - since) / 1_000_000
             },
             log: self.log_path().display().to_string(),
+            endpoint: self
+                .cfg
+                .endpoint
+                .as_ref()
+                .map(Endpoint::url)
+                .unwrap_or_default(),
+            client: self.cfg.client.clone(),
             last_context: self
                 .inner
                 .lock()
@@ -593,6 +753,96 @@ mod tests {
         assert_eq!(c.threshold_ms, 20);
         c.apply_options("port=15003");
         assert_eq!(c.net_port, Some(15003));
+    }
+
+    #[test]
+    fn options_report_unknown_keys_and_bad_values() {
+        let mut c = Config::default();
+        let r = c.apply_options("threshold=400; bogus=1; tresh=9; port=abc; nokey; ;dir=");
+        assert_eq!(r.ignored, vec!["bogus", "tresh", "port=abc", "nokey"]);
+        assert!(r.errors.is_empty());
+        assert_eq!(c.threshold_ms, 400);
+        assert_eq!(c.net_port, Some(5003), "bad value keeps the default");
+        assert_eq!(
+            r.start_result("/l.jsonl"),
+            "/l.jsonl\nignored: bogus, tresh, port=abc, nokey"
+        );
+        assert_eq!(OptionReport::default().start_result("/l.jsonl"), "/l.jsonl");
+    }
+
+    #[test]
+    fn options_endpoint_token_client() {
+        let mut c = Config::default();
+        let r =
+            c.apply_options("endpoint=http://192.168.1.10:8787; token=ab=cd; client=Front Desk");
+        assert_eq!(r, OptionReport::default());
+        let e = c.endpoint.clone().unwrap();
+        assert_eq!(
+            (e.host.as_str(), e.port, e.base.as_str()),
+            ("192.168.1.10", 8787, "")
+        );
+        assert_eq!(e.url(), "http://192.168.1.10:8787");
+        assert_eq!(c.token, "ab=cd", "only the first '=' splits");
+        assert_eq!(c.client, "Front Desk");
+
+        // Endpoint without token: error.
+        let mut c = Config::default();
+        let r = c.apply_options("endpoint=http://fr.local:8787");
+        assert_eq!(r.errors, vec!["token is required with endpoint"]);
+        assert_eq!(r.error_result(), "error: token is required with endpoint");
+
+        // Not http: error.
+        for bad in [
+            "https://h:8787",
+            "h:8787",
+            "http://:8787",
+            "http://h:0",
+            "http://h:99999",
+            "http://h/x?y",
+        ] {
+            let mut c = Config::default();
+            let r = c.apply_options(&format!("endpoint={bad};token=t"));
+            assert_eq!(r.errors.len(), 1, "{bad}: {r:?}");
+        }
+
+        // Token alone is fine; empty endpoint turns sending off.
+        let mut c = Config::default();
+        assert!(c.apply_options("token=t; endpoint=").errors.is_empty());
+        assert!(c.endpoint.is_none());
+    }
+
+    #[test]
+    fn endpoint_forms() {
+        let e = Endpoint::parse("HTTP://fr.local/base/").unwrap();
+        assert_eq!(
+            (e.host.as_str(), e.port, e.base.as_str()),
+            ("fr.local", 80, "/base")
+        );
+        assert_eq!(e.url(), "http://fr.local:80/base");
+        let e = Endpoint::parse("http://[::1]:8787").unwrap();
+        assert_eq!((e.host.as_str(), e.port), ("::1", 8787));
+        assert_eq!(e.authority(), "[::1]:8787");
+    }
+
+    #[test]
+    fn status_shows_endpoint_not_token() {
+        let dir = std::env::temp_dir().join(format!("fr-status-{}", std::process::id()));
+        let mut cfg = Config {
+            log_dir: dir.clone(),
+            net_port: None,
+            ..Default::default()
+        };
+        cfg.apply_options("endpoint=http://127.0.0.1:9;token=secret-token;client=Desk 4");
+        let rec = Recorder::start(cfg, Box::new(crate::net::NoProbe));
+        let st = rec.stop();
+        let json = serde_json::to_string(&st).unwrap();
+        assert!(
+            json.contains("\"endpoint\":\"http://127.0.0.1:9\""),
+            "{json}"
+        );
+        assert!(json.contains("\"client\":\"Desk 4\""), "{json}");
+        assert!(!json.contains("secret-token"), "{json}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
