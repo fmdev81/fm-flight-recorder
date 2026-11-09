@@ -15,6 +15,7 @@ pub mod net;
 pub mod recorder;
 #[cfg(target_os = "macos")]
 pub mod runloop;
+pub mod wire;
 
 #[cfg(feature = "fmx")]
 pub mod fmx;
