@@ -30,3 +30,10 @@ path = "src/bin/fakelog.rs"
 # panic = "unwind" (default) so the glue can catch_unwind at every C entry
 lto = true
 codegen-units = 1
+
+# The plug-in (this package) and the companion server (server/).
+# The plug-in stays the root package, so `cargo build` and
+# scripts/build-plugin.sh build only the plug-in.
+[workspace]
+members = [".", "server"]
+resolver = "2"

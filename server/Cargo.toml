@@ -1,0 +1,27 @@
+[package]
+name = "fr-server"
+version = "0.1.0"
+edition = "2021"
+description = "Flight Recorder companion server: event ingest and dashboard for the LAN"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "fr-server"
+path = "src/main.rs"
+
+[dependencies]
+# The plug-in crate gives the wire types (src/wire.rs, src/eventlog.rs),
+# so the server and the plug-in cannot drift.
+fm_flight_recorder = { path = ".." }
+askama = "0.14"
+axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+clap = { version = "4", features = ["derive"] }
+iana-time-zone = "0.1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+toml = "0.8"

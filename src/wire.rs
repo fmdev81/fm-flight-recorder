@@ -1,8 +1,8 @@
 //! Wire types of the ingest API (docs/ingest-api.md).
 //!
 //! These types are the contract between the plug-in and the companion
-//! server. They depend only on serde. In #21 they move to the shared
-//! `fr-events` crate of the Cargo workspace.
+//! server. They depend only on serde. The server (`server/`) uses them
+//! from this crate.
 
 use crate::eventlog::Event;
 use serde::{Deserialize, Serialize};
