@@ -120,6 +120,8 @@ pub struct SendQueue {
     st: Mutex<QState>,
     cv: Condvar,
     max: usize,
+    /// Copy of `items.len()`, for Status without the lock.
+    len: AtomicU64,
 }
 
 impl SendQueue {
@@ -128,6 +130,7 @@ impl SendQueue {
             st: Mutex::new(QState::default()),
             cv: Condvar::new(),
             max: max.max(1),
+            len: AtomicU64::new(0),
         }
     }
 
@@ -147,13 +150,15 @@ impl SendQueue {
             line,
             at: Instant::now(),
         });
+        self.len.store(st.items.len() as u64, Relaxed);
         drop(st);
         self.cv.notify_one();
         dropped
     }
 
+    /// Events waiting. Reads an atomic: no lock.
     pub fn len(&self) -> usize {
-        self.st.lock().unwrap().items.len()
+        self.len.load(Relaxed) as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -176,6 +181,7 @@ impl SendQueue {
         st.closed = true;
         st.stop = true;
         let out = st.items.drain(..).map(|i| (i.seq, i.line)).collect();
+        self.len.store(0, Relaxed);
         drop(st);
         self.cv.notify_all();
         out
@@ -190,6 +196,7 @@ impl SendQueue {
             st.items.pop_front();
             n += 1;
         }
+        self.len.store(st.items.len() as u64, Relaxed);
         n
     }
 }

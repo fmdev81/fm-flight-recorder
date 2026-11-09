@@ -257,3 +257,54 @@ fn server_error_is_retried() {
     rec.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn status_shows_send_counters_and_errors() {
+    // Server up: sent and last_send.
+    let srv = Receiver::start(0);
+    let dir = tmp("status-ok");
+    let rec = Recorder::start(
+        cfg(&dir, &srv.endpoint()),
+        Box::new(fm_flight_recorder::net::NoProbe),
+    );
+    marks(&rec, 4);
+    assert!(srv
+        .state
+        .wait_for(Duration::from_secs(3), |s| s.seqs().len() == 5));
+    let st = rec.status();
+    assert_eq!(
+        (st.sent, st.queued, st.dropped, st.send_failures),
+        (5, 0, 0, 0),
+        "{st:?}"
+    );
+    assert!(st.last_send.ends_with('Z'), "{}", st.last_send);
+    assert_eq!(st.last_send_error, "");
+    assert_eq!(st.endpoint, srv.endpoint());
+    rec.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Server down: failures, spooled, last_send_error.
+    let dir = tmp("status-down");
+    let rec = Recorder::start(
+        cfg(&dir, &format!("http://127.0.0.1:{}", closed_port())),
+        Box::new(fm_flight_recorder::net::NoProbe),
+    );
+    marks(&rec, 4);
+    let s = rec.sender().unwrap();
+    assert!(srv
+        .state
+        .wait_for(Duration::from_secs(3), |_| s.stats.spooled.load(Relaxed)
+            == 5));
+    let st = rec.status();
+    assert!(st.send_failures >= 1, "{st:?}");
+    assert_eq!((st.sent, st.spooled, st.queued), (0, 5, 0));
+    assert!(
+        st.last_send_error.starts_with("send: "),
+        "{}",
+        st.last_send_error
+    );
+    assert_eq!(st.last_send, "");
+    assert!(!st.auth_failed);
+    rec.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

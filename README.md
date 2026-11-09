@@ -73,6 +73,13 @@ To send the events to the companion server, give the endpoint and the Event toke
 - If an option is not correct, the result starts with `error:` and the recorder does not change.
 - If the plug-in does not know an option, the second line of the result shows it, for example `ignored: tresh`.
 
+To see if the plug-in can send, use `FlightRecorder_Status`. These values are in the JSON:
+
+- `sent`: the number of events that the server received.
+- `spooled`: the number of events in the spool. The plug-in keeps them on disk while it cannot connect to the server.
+- `last_send_error`: the last error of the connection to the server.
+- `write_errors` and `last_write_error`: errors of the log file.
+
 The API is in [docs/ingest-api.md](docs/ingest-api.md).
 
 ## Log
