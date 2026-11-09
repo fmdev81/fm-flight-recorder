@@ -17,8 +17,9 @@ This plug-in is a prototype.
 - The plug-in loads in FileMaker Pro 26.0.3 on macOS.
 - The plug-in records freezes in FileMaker Pro 26.0.3 on macOS.
 - We did not test the plug-in with a file on FileMaker Server.
-- The plug-in can send events to a companion server.
-- Not built yet: the companion server and its dashboard. See issues [#21](https://github.com/solutionscay/fm-flight-recorder/issues/21), [#22](https://github.com/solutionscay/fm-flight-recorder/issues/22) and [#23](https://github.com/solutionscay/fm-flight-recorder/issues/23).
+- The plug-in can send events to the companion server (`fr-server`) on your LAN.
+- The companion server keeps the events and shows them in a dashboard.
+- We did not test the plug-in and the server together at a site.
 
 ## What you need
 
@@ -91,10 +92,10 @@ The ABI check (`scripts/check-abi.sh`) needs the SDK headers.
 
 Do these steps in the repository folder.
 
-1. Run the tests. You do not need FileMaker Pro for the tests.
+1. Run the tests of the plug-in and the server. You do not need FileMaker Pro for the tests.
 
    ```sh
-   cargo test
+   cargo test --workspace
    ```
 
 2. Compare the plug-in ABI with the SDK headers:
@@ -205,6 +206,179 @@ Put the options in one text value. Put a semicolon between two options.
 If the plug-in does not know an option, the second line of the result shows it.
 If the value of `endpoint` is not correct, or `token` is missing, the result starts with `error:`. Then the recorder does not change.
 
+## Run the companion server
+
+The companion server (`fr-server`) receives the events from the plug-ins and shows them in a dashboard.
+It is one program. The dashboard is in the program.
+Run it on one Mac on the LAN. All FileMaker Pro clients must be able to connect to this Mac.
+
+The server uses plain HTTP and has no sign-in. Each computer on the LAN can see the dashboard and the Event token.
+
+### Build the server
+
+Do these steps in the repository folder.
+
+1. Build the server:
+
+   ```sh
+   scripts/build-server.sh
+   ```
+
+   The build puts the server in `dist/fr-server`.
+
+2. Copy the server to a folder in your `PATH`:
+
+   ```sh
+   sudo mkdir -p /usr/local/bin
+   sudo cp dist/fr-server /usr/local/bin/
+   ```
+
+You can copy `dist/fr-server` to a different Mac. You do not need Rust on that Mac.
+If you copy the file from a zip file or from a download, remove the quarantine attribute:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/fr-server
+```
+
+### Start the server
+
+```sh
+fr-server serve
+```
+
+- The server listens on port 8787 on all network interfaces.
+- The first line of the output shows the dashboard address, the database file and the time zone.
+- To stop the server, push Control-C.
+
+If the macOS firewall is on, macOS asks if `fr-server` can accept incoming connections. Click **Allow**.
+If you do not see this dialog, open **System Settings > Network > Firewall > Options**, and add `fr-server`.
+
+### Open the dashboard
+
+Open this address in a browser on the LAN. Use the LAN address of the server Mac:
+
+`http://192.168.1.10:8787`
+
+The pages are Overview, Layouts, Scripts, Users, Clients, Freezes and Setup.
+
+### Connect FileMaker Pro to the server
+
+1. In the dashboard, open **Setup**.
+2. In **Startup script step**, click **Copy**.
+3. In your FileMaker solution, open the script that runs at **OnFirstWindowOpen**.
+4. Add a **Set Variable** step. Paste the calculation as its value.
+
+The calculation has this form:
+
+```
+FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>; threshold=250; port=5003" )
+```
+
+- `endpoint` is the address of the server Mac.
+- `token` is the Event token of the server.
+- To give a client name, select `client=` in Setup and type the name.
+
+After the next start of FileMaker Pro, the client shows on the **Clients** page.
+`FlightRecorder_Status` in the Data Viewer shows `sent` and `last_send_error`.
+
+### See and replace the Event token
+
+- To see the token, open **Setup** and click **Show**.
+- To see the token in Terminal, run `fr-server token`.
+- To make a new token, click **New token** in Setup, or run `fr-server token --new`.
+
+After a new token, clients with the old token get the error `401`. They stop to send until you change their startup script step.
+A running server uses a token from `fr-server token --new` in 1 minute or less.
+
+### Where the data is
+
+The server keeps its data in this folder:
+
+`~/Library/Application Support/FlightRecorder Server/`
+
+- `flight-recorder.sqlite`: the database (events, clients, sessions, daily totals, settings and the Event token).
+- `config.toml`: an optional config file.
+
+To use a different folder, start the server with `--data-dir <folder>`.
+To use a different database file, start the server with `--db <file>`.
+
+The server keeps the events for 30 days and the daily totals for 730 days. You can change the two values in **Setup > Retention**.
+
+To make a backup, stop the server and copy the folder.
+You can also copy the database while the server runs:
+
+```sh
+sqlite3 ~/Library/Application\ Support/FlightRecorder\ Server/flight-recorder.sqlite ".backup /path/to/backup.sqlite"
+```
+
+### Options of the server
+
+You can give the options on the command line or in `config.toml`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--listen` | `0.0.0.0:8787` | The address and the port. |
+| `--data-dir` | `~/Library/Application Support/FlightRecorder Server` | The data folder. |
+| `--db` | `<data folder>/flight-recorder.sqlite` | The database file. |
+| `--tz` | the time zone of the Mac | The IANA time zone for days and hours, for example `America/Chicago`. |
+| `--log-file` | none (the log goes to the terminal) | The log file. |
+| `--public-url` | `http://<LAN address>:<port>` | The address in the startup script step. |
+
+An example of `config.toml`:
+
+```toml
+listen = "0.0.0.0:8787"
+tz = "America/Chicago"
+event_days = 30
+total_days = 730
+```
+
+Other commands:
+
+| Command | Result |
+|---|---|
+| `fr-server version` | Shows the version. |
+| `fr-server token` | Shows the Event token. `--new` makes a new token. |
+| `fr-server import --client "Front Desk" flight-*.jsonl` | Adds the events of JSONL logs to the database. `--client` gives the client name for older logs that have no client fields. A second import of the same file adds nothing. |
+| `fr-server fake` | Adds synthetic data for a demonstration. Do not use it on a server with real data. |
+| `fr-server rollup` | Writes the daily totals and deletes old data now. The server also does this each hour. |
+
+### Start the server automatically
+
+macOS can start the server when you log in, and start it again if it stops.
+
+1. Copy the launchd file:
+
+   ```sh
+   cp packaging/fr-server.plist ~/Library/LaunchAgents/com.solutionscay.fr-server.plist
+   ```
+
+2. In the file, replace `USER` with your macOS user name.
+3. Load the file:
+
+   ```sh
+   launchctl load ~/Library/LaunchAgents/com.solutionscay.fr-server.plist
+   ```
+
+The log is in `~/Library/Logs/fr-server.log`.
+To stop the server and remove the automatic start:
+
+```sh
+launchctl unload ~/Library/LaunchAgents/com.solutionscay.fr-server.plist
+rm ~/Library/LaunchAgents/com.solutionscay.fr-server.plist
+```
+
+The server starts when the user logs in. To start it when the Mac starts, set the Mac to log in automatically.
+
+### Try the server without FileMaker Pro
+
+```sh
+cargo run -p fr-server -- --data-dir /tmp/fr-demo fake
+cargo run -p fr-server -- --data-dir /tmp/fr-demo serve --listen 127.0.0.1:8787
+```
+
+Then open `http://127.0.0.1:8787`. All names in the synthetic data are made up.
+
 ## Send events to the companion server
 
 To send the events to the companion server, give the endpoint and the Event token:
@@ -238,7 +412,7 @@ The log format is in [docs/design.md](docs/design.md).
    rm -rf ~/Library/Application\ Support/FileMaker/Extensions/FlightRecorder.fmplugin
    ```
 
-3. Optional: delete the logs and the spool:
+3. Optional: delete the logs and the spool of the plug-in:
 
    ```sh
    rm -rf ~/Library/Logs/FlightRecorder
@@ -256,8 +430,24 @@ The log format is in [docs/design.md](docs/design.md).
    3. Select the FlightRecorder entry.
    4. Push the Delete key.
 
+## Remove the companion server
+
+1. Stop the server. If you use launchd, remove the automatic start (see above).
+2. Delete the program:
+
+   ```sh
+   sudo rm /usr/local/bin/fr-server
+   ```
+
+3. Optional: delete the data:
+
+   ```sh
+   rm -rf ~/Library/Application\ Support/FlightRecorder\ Server
+   ```
+
 ## More information
 
-- [docs/design.md](docs/design.md): the design, the log format, and the test plan.
+- [docs/design.md](docs/design.md): the design, the log format, the server, and the test plan.
+- [server/README.md](server/README.md): notes for the server code.
 - [docs/sdk-notes.md](docs/sdk-notes.md): notes about the Claris plug-in SDK.
 - [docs/ingest-api.md](docs/ingest-api.md): the API that the plug-in uses to send events to the companion server.

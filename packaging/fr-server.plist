@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd job for the Flight Recorder companion server.
+     Copy to ~/Library/LaunchAgents/com.solutionscay.fr-server.plist.
+     Replace USER with the macOS user name. See README.md. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.solutionscay.fr-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/fr-server</string>
+    <string>serve</string>
+    <string>--log-file</string>
+    <string>/Users/USER/Library/Logs/fr-server.log</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
