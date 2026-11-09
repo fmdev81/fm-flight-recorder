@@ -35,6 +35,13 @@ fn main() {
         "cargo:warning=linking FMWrapper.framework from {}",
         dir.display()
     );
+    // Run this script again when the framework folder changes or is gone
+    // (for example after the repository moves). Otherwise cargo keeps the
+    // old absolute search path and the link fails.
+    println!(
+        "cargo:rerun-if-changed={}",
+        dir.join("FMWrapper.framework").display()
+    );
     println!("cargo:rustc-link-search=framework={}", dir.display());
     // SDK sample uses @loader_path/../Frameworks; the app's own copy is at
     // @executable_path/../Frameworks. Both are harmless.
