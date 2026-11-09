@@ -61,6 +61,20 @@ The plug-in starts to record when FileMaker Pro starts.
 | `FlightRecorder_Status` | Gives the status of the recorder as JSON. |
 | `FlightRecorder_SimulateFreeze ( milliseconds )` | Stops FileMaker Pro for the given time. The maximum is 10000 ms. Use it only for tests. |
 
+## Send events to the companion server
+
+To send the events to the companion server, give the endpoint and the Event token:
+
+`FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>" )`
+
+- The endpoint must start with `http://`.
+- The token is necessary when you give an endpoint.
+- Add `client=<name>` to change the client name. The default is the macOS computer name.
+- If an option is not correct, the result starts with `error:` and the recorder does not change.
+- If the plug-in does not know an option, the second line of the result shows it, for example `ignored: tresh`.
+
+The API is in [docs/ingest-api.md](docs/ingest-api.md).
+
 ## Log
 
 The plug-in writes one log file each day to this folder:

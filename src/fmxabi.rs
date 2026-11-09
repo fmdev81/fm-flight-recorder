@@ -139,7 +139,7 @@ pub const FUNCTIONS: &[(i16, &str, &str, &str, i16, i16)] = &[
         2,
         "FlightRecorder_Start",
         "FlightRecorder_Start( { options } )",
-        "Start recording. Options: \"threshold=250;port=5003;scripts=0;context_ms=250\". Returns the log path.",
+        "Start recording. Options: \"threshold=250;port=5003;scripts=0;context_ms=250;endpoint=http://host:8787;token=…;client=name\". Returns the log path, or error: … for a bad endpoint or a missing token.",
         0,
         1,
     ),
