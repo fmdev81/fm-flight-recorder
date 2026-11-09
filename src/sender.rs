@@ -10,15 +10,21 @@
 //! * The queue is bounded. When it is full, the oldest unsent event is
 //!   dropped and counted. The JSONL log still has it.
 //! * The queue lock is held only to add, peek or remove items, never
-//!   during I/O. A batch stays in the queue until the server accepts it.
-//! * [`Sender::stop`] never waits for the network: it closes the socket in
-//!   use, waits a few ms for the thread, and detaches it if it is still in
-//!   `connect`.
+//!   during I/O. A batch stays in the queue until the server accepts it,
+//!   or until it is in the spool.
+//! * When a post fails, the batch goes to the disk spool ([`Spool`]), and
+//!   the next try waits longer each time (1 s, 2 s, 4 s … 5 min). The spool
+//!   is always sent before newer events, also after a restart.
+//! * [`Sender::finish`] never waits for the network: it closes the socket
+//!   in use, waits a few ms for the thread, and detaches it if it is still
+//!   in `connect`. The writer thread puts the unsent events in the spool.
 
 use crate::http::{self, Abort, Timeouts};
 use crate::recorder::Endpoint;
+use crate::spool::Spool;
 use crate::wire::{ClientInfo, IngestReply, API_VERSION, PATH_EVENTS};
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::*};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -38,8 +44,14 @@ pub struct SendSettings {
     /// Events kept in memory for sending.
     pub queue_max: usize,
     pub timeouts: Timeouts,
-    /// Wait after a failed post before the next try.
+    /// Wait after the first failed post; it doubles after each failure...
     pub retry: Duration,
+    /// ...up to this.
+    pub retry_max: Duration,
+    /// Folder for unsent batches. None = no spool (keep them in memory).
+    pub spool_dir: Option<PathBuf>,
+    /// Size cap of the spool; 0 = no spool.
+    pub spool_max_bytes: u64,
 }
 
 /// Counters, read by Status. Written by the writer and sender threads.
@@ -47,9 +59,13 @@ pub struct SendSettings {
 pub struct SendStats {
     /// Events the server accepted (or had already).
     pub sent: AtomicU64,
-    /// Events dropped: queue full, refused by the server (400/413), or
-    /// not sent at stop.
+    /// Events dropped: queue full, spool full, refused by the server
+    /// (400/413), or not sent at stop without a spool.
     pub dropped: AtomicU64,
+    /// Events in the spool now.
+    pub spooled: AtomicU64,
+    /// Events the server said it had already (resends).
+    pub duplicates: AtomicU64,
     /// Failed posts (network error, timeout, 401, 5xx).
     pub failures: AtomicU64,
     /// Unix ms of the last accepted batch, 0 = never.
@@ -125,6 +141,11 @@ impl SendQueue {
         self.len() == 0
     }
 
+    fn is_stopped(&self) -> bool {
+        let st = self.st.lock().unwrap();
+        st.stop || st.closed
+    }
+
     fn stop(&self) {
         self.st.lock().unwrap().stop = true;
         self.cv.notify_all();
@@ -154,10 +175,32 @@ impl SendQueue {
     }
 }
 
+/// The JSON body of `POST /api/v1/events` for these lines.
+pub fn batch_body(session_id: &str, client: &ClientInfo, lines: &[(u64, String)]) -> String {
+    let mut b = String::with_capacity(lines.iter().map(|x| x.1.len() + 1).sum::<usize>() + 512);
+    b.push_str(&format!(
+        "{{\"v\":{API_VERSION},\"session_id\":{},\"client\":{},\"events\":[",
+        serde_json::to_string(session_id).unwrap(),
+        serde_json::to_string(client).unwrap()
+    ));
+    for (i, (_, line)) in lines.iter().enumerate() {
+        if i > 0 {
+            b.push(',');
+        }
+        b.push_str(line);
+    }
+    b.push_str("]}");
+    b
+}
+
 /// The running sender thread.
 pub struct Sender {
     pub queue: Arc<SendQueue>,
     pub stats: Arc<SendStats>,
+    spool: Option<Arc<Spool>>,
+    session_id: String,
+    client: Arc<OnceLock<ClientInfo>>,
+    batch_max: usize,
     abort: Abort,
     thread: Mutex<Option<JoinHandle<()>>>,
     done: Mutex<Receiver<()>>,
@@ -172,13 +215,20 @@ impl Sender {
         let queue = Arc::new(SendQueue::new(settings.queue_max));
         let stats = Arc::new(SendStats::default());
         let abort = Abort::default();
+        let spool = settings
+            .spool_dir
+            .clone()
+            .filter(|_| settings.spool_max_bytes > 0)
+            .map(|d| Arc::new(Spool::new(d, settings.spool_max_bytes)));
         let (done_tx, done_rx) = mpsc::channel::<()>();
+        let batch_max = settings.batch_max;
         let worker = Worker {
             s: settings,
             queue: queue.clone(),
             stats: stats.clone(),
-            session_id,
-            client,
+            spool: spool.clone(),
+            session_id: session_id.clone(),
+            client: client.clone(),
             abort: abort.clone(),
         };
         let thread = thread::Builder::new()
@@ -192,6 +242,10 @@ impl Sender {
         Sender {
             queue,
             stats,
+            spool,
+            session_id,
+            client,
+            batch_max,
             abort,
             thread: Mutex::new(Some(thread)),
             done: Mutex::new(done_rx),
@@ -221,47 +275,206 @@ impl Sender {
         }
         ended
     }
+
+    /// At stop (writer thread): put the events that were not sent into the
+    /// spool, or count them as dropped if there is no spool.
+    pub fn spool_rest(&self, items: Vec<(u64, String)>) {
+        if items.is_empty() {
+            return;
+        }
+        let st = &self.stats;
+        let Some(spool) = &self.spool else {
+            st.dropped.fetch_add(items.len() as u64, Relaxed);
+            st.set_error(format!("{} events not sent at stop", items.len()));
+            return;
+        };
+        let client = self.client.get().cloned().unwrap_or_default();
+        for chunk in items.chunks(self.batch_max.max(1)) {
+            let body = batch_body(&self.session_id, &client, chunk);
+            let n = chunk.len() as u64;
+            match spool.write(&body, &self.session_id, chunk[0].0, n) {
+                Ok(dropped) => {
+                    st.dropped.fetch_add(dropped, Relaxed);
+                }
+                Err(e) => {
+                    st.dropped.fetch_add(n, Relaxed);
+                    st.set_error(format!("spool {}: {e}", spool.dir().display()));
+                }
+            }
+        }
+        st.spooled.store(spool.count().events, Relaxed);
+    }
 }
 
 struct Worker {
     s: SendSettings,
     queue: Arc<SendQueue>,
     stats: Arc<SendStats>,
+    spool: Option<Arc<Spool>>,
     session_id: String,
     client: Arc<OnceLock<ClientInfo>>,
     abort: Abort,
 }
 
-enum Outcome {
-    /// Remove the batch from the queue.
-    Done,
-    /// Keep the batch; try again after this time.
-    RetryAt(Instant),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Post {
+    /// 200: the server has the events.
+    Accepted,
+    /// 400/413: the server will never take this batch. Dropped.
+    Refused,
+    /// 401: bad token. Sending stops until the next start.
+    Unauthorized,
+    /// Network error, timeout, other status: try again later.
+    Failed,
+}
+
+enum Next {
+    Stop,
+    /// `wake` time reached, no batch due.
+    Wake,
+    Batch(Vec<(u64, String)>),
+}
+
+/// Retry timing: 1 s, 2 s, 4 s, … up to the maximum.
+struct Backoff {
+    first: Duration,
+    max: Duration,
+    cur: Option<Duration>,
+    until: Option<Instant>,
+}
+
+impl Backoff {
+    fn failed(&mut self) {
+        let d = match self.cur {
+            None => self.first,
+            Some(d) => (d * 2).min(self.max),
+        };
+        self.cur = Some(d);
+        self.until = Some(Instant::now() + d);
+    }
+    fn hold(&mut self, d: Duration) {
+        self.until = Some(Instant::now() + d);
+    }
+    fn ok(&mut self) {
+        self.cur = None;
+        self.until = None;
+    }
+    fn ready(&self) -> bool {
+        self.until.is_none_or(|t| Instant::now() >= t)
+    }
 }
 
 impl Worker {
     fn run(self) {
-        let mut retry_at: Option<Instant> = None;
-        while let Some(batch) = self.next_batch(retry_at) {
-            let last_seq = batch.last().map(|b| b.0).unwrap_or(0);
-            match self.post(&batch) {
-                Outcome::Done => {
-                    self.queue.commit(last_seq);
-                    retry_at = None;
+        let mut b = Backoff {
+            first: self.s.retry,
+            max: self.s.retry_max.max(self.s.retry),
+            cur: None,
+            until: None,
+        };
+        // Spool from earlier runs is sent first.
+        let mut spool_pending = self.spool.as_ref().is_some_and(|s| !s.is_empty());
+        let mut spool_ok = true;
+        self.update_spool_count();
+        loop {
+            if self.queue.is_stopped() {
+                return;
+            }
+            let auth_failed = self.stats.auth_failed.load(Relaxed);
+            // 1. The spool first, oldest file first.
+            if spool_pending && !auth_failed && b.ready() {
+                let spool = self.spool.as_ref().unwrap();
+                match spool.oldest() {
+                    None => spool_pending = false,
+                    Some((path, body, n)) => match self.post(&body, n) {
+                        Post::Accepted | Post::Refused => {
+                            spool.remove(&path);
+                            b.ok();
+                        }
+                        Post::Unauthorized => b.hold(Duration::from_secs(3600)),
+                        Post::Failed => b.failed(),
+                    },
                 }
-                Outcome::RetryAt(t) => retry_at = Some(t),
+                self.update_spool_count();
+                continue;
+            }
+            // 2. Wait for a batch from memory. While offline with a working
+            // spool, due batches go to the spool at once (memory stays
+            // small, and they survive a restart). Without a spool, they
+            // wait in the queue until the next try.
+            let spool_usable = self.spool.is_some() && spool_ok;
+            let gate = if spool_usable { None } else { b.until };
+            let wake = if spool_pending && !auth_failed {
+                b.until
+            } else {
+                None
+            };
+            let batch = match self.next_batch(gate, wake) {
+                Next::Stop => return,
+                Next::Wake => continue,
+                Next::Batch(batch) => batch,
+            };
+            let (first_seq, last_seq) = (batch[0].0, batch[batch.len() - 1].0);
+            let n = batch.len() as u64;
+            let client = self.client.get().cloned().unwrap_or_default();
+            let body = batch_body(&self.session_id, &client, &batch);
+            // Keep the order: nothing from memory goes out before the spool.
+            let online = !auth_failed && b.ready() && !spool_pending;
+            let result = online.then(|| self.post(&body, n));
+            match result {
+                Some(Post::Accepted) | Some(Post::Refused) => {
+                    self.queue.commit(last_seq);
+                    b.ok();
+                    continue;
+                }
+                Some(Post::Failed) => b.failed(),
+                Some(Post::Unauthorized) => b.hold(Duration::from_secs(3600)),
+                None => {}
+            }
+            // Not sent: spool it.
+            match &self.spool {
+                Some(spool) => match spool.write(&body, &self.session_id, first_seq, n) {
+                    Ok(dropped) => {
+                        self.stats.dropped.fetch_add(dropped, Relaxed);
+                        self.queue.commit(last_seq);
+                        spool_pending = true;
+                        spool_ok = true;
+                        self.update_spool_count();
+                    }
+                    Err(e) => {
+                        // Keep it in memory (the queue is bounded).
+                        spool_ok = false;
+                        self.stats
+                            .set_error(format!("spool {}: {e}", spool.dir().display()));
+                        if b.ready() {
+                            b.failed();
+                        }
+                    }
+                },
+                None => {
+                    if b.ready() {
+                        b.failed();
+                    }
+                }
             }
         }
     }
 
-    /// Wait until a batch is due, then copy it out of the queue (it stays
-    /// in the queue until it is committed). None = stop.
-    fn next_batch(&self, retry_at: Option<Instant>) -> Option<Vec<(u64, String)>> {
+    fn update_spool_count(&self) {
+        if let Some(s) = &self.spool {
+            self.stats.spooled.store(s.count().events, Relaxed);
+        }
+    }
+
+    /// Wait until a batch is due (not before `gate`), or until `wake`, then
+    /// copy the batch out of the queue (it stays in the queue until it is
+    /// committed).
+    fn next_batch(&self, gate: Option<Instant>, wake: Option<Instant>) -> Next {
         let q = &self.queue;
         let mut st = q.st.lock().unwrap();
         loop {
             if st.stop || st.closed {
-                return None;
+                return Next::Stop;
             }
             let now = Instant::now();
             let due = st.items.front().map(|first| {
@@ -270,16 +483,25 @@ impl Worker {
                 } else {
                     first.at + self.s.interval
                 };
-                match retry_at {
-                    Some(r) if r > due => r,
+                match gate {
+                    Some(g) if g > due => g,
                     _ => due,
                 }
             });
-            match due {
-                Some(t) if t <= now => break,
-                Some(t) => st = q.cv.wait_timeout(st, t - now).unwrap().0,
-                None => st = q.cv.wait(st).unwrap(),
+            if due.is_some_and(|t| t <= now) {
+                break;
             }
+            if wake.is_some_and(|t| t <= now) {
+                return Next::Wake;
+            }
+            let until = match (due, wake) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            st = match until {
+                Some(t) => q.cv.wait_timeout(st, t - now).unwrap().0,
+                None => q.cv.wait(st).unwrap(),
+            };
         }
         let mut out = Vec::new();
         let mut bytes = 0;
@@ -292,36 +514,12 @@ impl Worker {
             bytes += i.line.len() + 1;
             out.push((i.seq, i.line.clone()));
         }
-        Some(out)
+        Next::Batch(out)
     }
 
-    fn body(&self, batch: &[(u64, String)]) -> String {
-        let client = self.client.get().cloned().unwrap_or_default();
-        let mut b = String::with_capacity(batch.iter().map(|x| x.1.len() + 1).sum::<usize>() + 512);
-        b.push_str(&format!(
-            "{{\"v\":{API_VERSION},\"session_id\":{},\"client\":{},\"events\":[",
-            serde_json::to_string(&self.session_id).unwrap(),
-            serde_json::to_string(&client).unwrap()
-        ));
-        for (i, (_, line)) in batch.iter().enumerate() {
-            if i > 0 {
-                b.push(',');
-            }
-            b.push_str(line);
-        }
-        b.push_str("]}");
-        b
-    }
-
-    fn post(&self, batch: &[(u64, String)]) -> Outcome {
-        let n = batch.len() as u64;
+    /// Post one batch body of `n` events and count the result.
+    fn post(&self, body: &str, n: u64) -> Post {
         let st = &self.stats;
-        if st.auth_failed.load(Relaxed) {
-            // 401 before: do not send until the next start. Keep the
-            // events (the queue drops the oldest when full).
-            return Outcome::RetryAt(Instant::now() + Duration::from_secs(3600));
-        }
-        let body = self.body(batch);
         let r = http::post_json(
             &self.s.endpoint,
             PATH_EVENTS,
@@ -330,16 +528,18 @@ impl Worker {
             self.s.timeouts,
             &self.abort,
         );
-        let retry = Outcome::RetryAt(Instant::now() + self.s.retry);
         match r {
             Ok(resp) if resp.status == 200 => {
                 st.sent.fetch_add(n, Relaxed);
                 st.last_send_unix_ms
                     .store(crate::eventlog::unix_ms_now(), Relaxed);
-                if serde_json::from_str::<IngestReply>(&resp.body).is_err() {
-                    st.set_error(format!("unexpected reply: {}", short(&resp.body)));
+                match serde_json::from_str::<IngestReply>(&resp.body) {
+                    Ok(r) => {
+                        st.duplicates.fetch_add(r.duplicates, Relaxed);
+                    }
+                    Err(_) => st.set_error(format!("unexpected reply: {}", short(&resp.body))),
                 }
-                Outcome::Done
+                Post::Accepted
             }
             Ok(resp) if resp.status == 400 || resp.status == 413 => {
                 st.dropped.fetch_add(n, Relaxed);
@@ -349,23 +549,23 @@ impl Worker {
                     n,
                     short(&resp.body)
                 ));
-                Outcome::Done
+                Post::Refused
             }
             Ok(resp) if resp.status == 401 => {
                 st.failures.fetch_add(1, Relaxed);
                 st.auth_failed.store(true, Relaxed);
                 st.set_error("HTTP 401: bad token, sending stopped until FlightRecorder_Start");
-                Outcome::RetryAt(Instant::now() + Duration::from_secs(3600))
+                Post::Unauthorized
             }
             Ok(resp) => {
                 st.failures.fetch_add(1, Relaxed);
                 st.set_error(format!("HTTP {}: {}", resp.status, short(&resp.body)));
-                retry
+                Post::Failed
             }
             Err(e) => {
                 st.failures.fetch_add(1, Relaxed);
                 st.set_error(format!("send: {e}"));
-                retry
+                Post::Failed
             }
         }
     }
@@ -379,7 +579,6 @@ fn short(s: &str) -> String {
         s.to_string()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

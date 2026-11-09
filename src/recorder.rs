@@ -113,8 +113,11 @@ pub struct Config {
     pub send_connect_ms: u64,
     /// Read/write timeout of one post.
     pub send_io_ms: u64,
-    /// Wait after a failed post.
+    /// Wait after the first failed post; it doubles up to `send_retry_max_ms`.
     pub send_retry_ms: u64,
+    pub send_retry_max_ms: u64,
+    /// Size cap of the offline spool (`<log_dir>/spool/`); 0 = no spool.
+    pub send_spool_max_bytes: u64,
 }
 
 /// Events waiting for the writer thread. Full = lost and counted.
@@ -219,6 +222,8 @@ impl Default for Config {
             send_connect_ms: 1000,
             send_io_ms: 3000,
             send_retry_ms: 1000,
+            send_retry_max_ms: 300_000,
+            send_spool_max_bytes: 20 << 20,
         }
     }
 }
@@ -452,6 +457,9 @@ impl Recorder {
                         io: Duration::from_millis(cfg.send_io_ms),
                     },
                     retry: Duration::from_millis(cfg.send_retry_ms),
+                    retry_max: Duration::from_millis(cfg.send_retry_max_ms),
+                    spool_dir: Some(cfg.log_dir.join("spool")),
+                    spool_max_bytes: cfg.send_spool_max_bytes,
                 },
                 session_id.clone(),
                 client_info.clone(),
@@ -717,7 +725,8 @@ impl Recorder {
             idle_messages: self.shared.idle_msgs.load(Relaxed),
         });
         // The sender must not post any more: no network work at stop. Its
-        // socket is closed now; the writer hands the unsent events over.
+        // socket is closed now; the writer puts the unsent events in the
+        // spool (local disk, like the log).
         let t0 = Instant::now();
         if let Some(s) = &self.sender {
             s.signal_stop();
@@ -788,14 +797,10 @@ impl WriterThread {
                 }
             }
         }
-        // Stop: the events that were not sent stay in the JSONL log only.
+        // Stop: the events that were not sent go to the spool, and are sent
+        // first at the next start.
         if let Some(s) = &self.sender {
-            let left = s.queue.close();
-            if !left.is_empty() {
-                s.stats.dropped.fetch_add(left.len() as u64, Relaxed);
-                s.stats
-                    .set_error(format!("{} events not sent at stop", left.len()));
-            }
+            s.spool_rest(s.queue.close());
         }
     }
 }
