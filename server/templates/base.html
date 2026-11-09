@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ shell.title }} · Flight Recorder</title>
+<link rel="icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css?v={{ shell.asset }}">
+<link rel="stylesheet" href="/static/app.css?v={{ shell.asset }}">
+<script>try{var t=localStorage.getItem("fr-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<script src="/static/vendor/htmx.min.js?v={{ shell.asset }}" defer></script>
+<script src="/static/vendor/uPlot.iife.min.js?v={{ shell.asset }}" defer></script>
+<script src="/static/app.js?v={{ shell.asset }}" defer></script>
+</head>
+<body>
+<div class="shell">
+<aside class="side">
+<a class="brand" href="/"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="1" width="20" height="20" rx="5"></rect><path d="M4 11h3l2-5 3 10 2-5h4" fill="none" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></path></svg><span>Flight Recorder</span></a>
+<nav class="nav" aria-label="Main">
+<a href="/"{% if shell.nav == "overview" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 13.5h12M4 11V7.5M8 11V3M12 11V8.5"></path></svg>Overview</a>
+<a href="/layouts"{% if shell.nav == "layouts" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"></rect><path d="M2.5 6h11M6 6v7.5"></path></svg>Layouts</a>
+<a href="/scripts"{% if shell.nav == "scripts" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"></path></svg>Scripts</a>
+<a href="/users"{% if shell.nav == "users" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.5"></circle><path d="M3 13.5c.8-2.6 2.7-4 5-4s4.2 1.4 5 4"></path></svg>Users</a>
+<a href="/clients"{% if shell.nav == "clients" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1"></rect><path d="M6 14h4M8 11v3"></path></svg>Clients</a>
+<a href="/freezes"{% if shell.nav == "freezes" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 5v3l2 1.5"></path></svg>Freezes</a>
+<a href="/setup"{% if shell.nav == "setup" %} aria-current="page"{% endif %}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"></path><circle cx="6" cy="4" r="1.6"></circle><circle cx="10.5" cy="8" r="1.6"></circle><circle cx="5" cy="12" r="1.6"></circle></svg>Setup</a>
+</nav>
+<button type="button" class="theme" id="theme" aria-label="Theme">Auto</button>
+</aside>
+<header class="top">
+{% block top %}{% endblock %}
+</header>
+<main class="main" id="main"><div class="wrap">
+{% block content %}{% endblock %}
+</div></main>
+<footer class="srv">
+<div class="on"><span class="dot dot-ok"></span>Listening</div>
+<div class="mono">{{ shell.footer.listen }}</div>
+<div>{{ shell.footer.connected }} of {{ shell.footer.clients }} clients connected</div>
+<div>Last event <span class="mono">{{ shell.footer.last_event }}</span></div>
+<div>{{ shell.footer.tz }} · {{ shell.footer.tz_offset }}</div>
+<div>Server {{ shell.footer.server_version }} · Plug-in {{ shell.footer.plugin_version }}</div>
+</footer>
+</div>
+</body>
+</html>

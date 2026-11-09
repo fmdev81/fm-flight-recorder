@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block top %}
+<nav aria-label="Breadcrumb" class="crumbs"><a href="/scripts?{{ v.ctl.rq() }}">Scripts</a><span class="muted">/</span><span>{{ v.name }}</span></nav>
+<div class="title">
+<h1 class="h1">{{ v.name }}</h1>
+<div class="sub"><span>File {{ v.file }}</span>{% for g in v.tags %}<span class="tag">{{ g }}</span>{% endfor %}</div>
+</div>
+{% include "controls.html" %}
+<a class="btn" href="{{ v.ctl.cmp_url() }}" aria-pressed="{{ v.ctl.cmp }}">Compare to last week</a>
+{% endblock %}
+{% block content %}
+{% call m::tiles(v.tiles, "g-tiles") %}
+
+<div class="grid g-2">
+{% call m::chart(v.chart_title, v.chart) %}
+<div class="card"><div class="ch"><h2 class="ct">Runs by duration</h2></div>{% call m::hist(v.by_dur, "") %}</div>
+</div>
+
+<div class="grid g-2">
+<div class="card"><div class="ch"><h2 class="ct">Users</h2></div>{% call m::ntable(v.users, "Account", true) %}</div>
+<div class="card"><div class="ch"><h2 class="ct">Layouts</h2><span class="sub">layout after freeze</span></div>{% call m::ntable(v.layouts, "Layout", false) %}</div>
+</div>
+
+<div class="card">
+<div class="ch"><h2 class="ct">Runs that froze</h2><span class="sub">latest</span></div>
+{% if v.runs.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Time</th><th>Account</th><th>Client</th><th>From</th><th>Layout</th><th>Mark</th><th class="r">Duration</th><th class="r">Round trips</th><th style="width: 120px">Server / client</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in v.runs %}
+<tr><td class="mono"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td>
+<td><a href="{{ r.user_url }}" class="mono">{{ r.account }}</a> <span class="muted">{{ r.user }}</span></td>
+<td><a class="lite" href="{{ r.client_url }}">{{ r.client }}</a></td>
+<td class="muted">{{ r.from }}</td>
+<td><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
+<td class="muted">{{ r.marks }}</td>
+<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td>
+<td><div class="hb" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
+<td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+
+{% if !v.busy_runs.is_empty() %}
+<div class="card">
+<div class="ch"><h2 class="ct">Script busy runs</h2></div>
+{% call m::events(v.busy_runs, true, true) %}
+</div>
+{% endif %}
+{% endblock %}

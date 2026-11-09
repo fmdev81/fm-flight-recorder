@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block top %}
+<h1 class="h1" style="margin-right: auto">Overview</h1>
+<span class="date">{{ v.ctl.date }}</span>
+{% include "controls.html" %}
+{% endblock %}
+{% block content %}
+<div class="card">
+<div class="ch"><h2 class="ct">Flags</h2>{% if v.flags.count > 0 %}<span class="flag">{{ v.flags.count }} flags</span>{% else %}<span class="sub">0 flags</span>{% endif %}<a href="/setup#s-flags" style="font-size: 12px">Thresholds</a></div>
+<div class="flags">
+<div><div class="lbl">{{ v.flags.p95_label }}</div><ul>
+{% for x in v.flags.p95 %}<li><a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span></li>{% endfor %}
+{% if v.flags.p95.is_empty() %}<li class="muted">—</li>{% endif %}
+</ul></div>
+<div><div class="lbl">{{ v.flags.quiet_label }}</div><ul>
+{% for x in v.flags.quiet %}<li><a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span></li>{% endfor %}
+{% if v.flags.quiet.is_empty() %}<li class="muted">—</li>{% endif %}
+</ul></div>
+<div><div class="lbl">{{ v.flags.plugin_label }}</div><ul>
+{% for x in v.flags.old %}<li><a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span></li>{% endfor %}
+{% if v.flags.old.is_empty() %}<li class="muted">—</li>{% endif %}
+</ul></div>
+</div>
+</div>
+
+{% call m::tiles(v.tiles, "g-tiles4") %}
+
+{% call m::chart(v.chart_title, v.chart) %}
+
+<div class="grid g-2">
+<div class="card">
+<div class="ch"><h2 class="ct">Worst layouts</h2><a href="/layouts?{{ v.ctl.qs() }}" style="font-size: 12px">All layouts</a></div>
+{% if v.layouts.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Layout</th><th class="w30">Frozen</th><th class="r">Total</th><th class="r">Freezes</th><th class="r">p95</th></tr></thead>
+<tbody>
+{% for r in v.layouts %}
+<tr><td><a href="{{ r.url }}">{{ r.name }}</a> <span class="muted" style="font-size: 11px">{{ r.sub }}</span></td>
+<td>{% call m::split(r.split) %}</td><td class="r">{{ r.total }}</td><td class="r">{{ r.n }}</td>
+<td class="r">{% if r.flag %}<span class="flag">{{ r.p95 }}</span>{% else %}{{ r.p95 }}{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+<div class="card">
+<div class="ch"><h2 class="ct">Worst scripts</h2><a href="/scripts?{{ v.ctl.qs() }}" style="font-size: 12px">All scripts</a></div>
+{% if v.scripts.is_empty() %}<div class="empty">No freezes</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Script</th><th class="w30">Frozen</th><th class="r">Total</th><th class="r">Freezes</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in v.scripts %}
+<tr><td><a href="{{ r.url }}"{% if r.muted %} style="color: var(--muted)"{% endif %}>{{ r.name }}</a> <span class="muted" style="font-size: 11px">{{ r.sub }}</span></td>
+<td>{% call m::split(r.split) %}</td><td class="r">{{ r.total }}</td><td class="r">{{ r.n }}</td><td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+</div>
+
+<div class="card">
+<div class="ch"><h2 class="ct">Latest freezes</h2><a href="/freezes?{{ v.ctl.qs() }}" style="font-size: 12px">All freezes</a></div>
+{% include "freeze_table.html" %}
+</div>
+{% endblock %}

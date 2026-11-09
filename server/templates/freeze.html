@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block top %}
+<nav aria-label="Breadcrumb" class="crumbs"><a href="/freezes">Freezes</a><span class="muted">/</span><span class="mono">{{ v.crumb }}</span></nav>
+{% if v.found %}
+<div class="title">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+{% if !v.from.is_empty() %}<a href="{{ v.from_url }}" class="muted" style="font-size: 15px; text-decoration: none">{{ v.from }}</a><span class="muted" aria-label="to">→</span>{% endif %}
+<h1 class="h1"><a href="{{ v.layout_url }}" style="color: var(--ink); text-decoration: none">{{ v.layout }}</a></h1>
+</div>
+<div class="sub">
+<span class="mono">{{ v.when }}</span>
+<a href="{{ v.client_url }}">{{ v.client }}</a>
+<span><a href="{{ v.account_url }}" class="mono">{{ v.account }}</a> {{ v.user }}</span>
+{% if v.script != "—" %}<a href="{{ v.script_url }}">{{ v.script }}</a>{% endif %}
+<span>File {{ v.file }}</span>
+{% if !v.level.is_empty() %}<span class="pill">{{ v.level }}</span>{% endif %}
+</div>
+</div>
+{% if !v.prev_url.is_empty() %}<a class="btn" href="{{ v.prev_url }}">← Previous</a>{% endif %}
+{% if !v.next_url.is_empty() %}<a class="btn" href="{{ v.next_url }}">Next →</a>{% endif %}
+{% else %}
+<h1 class="h1">Freeze</h1>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% if !v.found %}<div class="card"><div class="empty">No freeze</div></div>{% else %}
+{% call m::tiles(v.tiles, "g-tiles") %}
+
+<div class="card">
+<div class="ch"><h2 class="ct">Timeline</h2><span class="key"><span class="sw sw-s"></span>{{ v.srv_label }}</span><span class="key"><span class="sw sw-c"></span>{{ v.cli_label }}</span>{% if !v.marks.is_empty() %}<span class="key"><span class="sw sw-m"></span>Mark</span>{% endif %}</div>
+<div class="tl">
+{% for a in v.axis %}<div class="ax" style="left: {{ a.0 }}"></div><div class="axl" style="left: {{ a.0 }}">{{ a.1 }}</div>{% endfor %}
+<div style="position: absolute; top: 4px; left: 0; right: 0; height: 36px">
+{% for mk in v.tl_marks %}<div class="mk" style="top: {{ mk.1 }}; left: {{ mk.0 }}"><i></i><span class="mono">{{ mk.2 }}</span></div>{% endfor %}
+</div>
+<div class="span" title="{{ v.srv_label }} · {{ v.cli_label }}" style="left: {{ v.span_x }}; width: {{ v.span_w }}"><div class="a" style="width: {{ v.span_srv }}"></div><div class="b"></div></div>
+<div class="t0" style="left: {{ v.span_x }}">{{ v.t0 }}</div>
+<div class="t1" style="left: {{ v.span_end }}">{{ v.t1 }}</div>
+</div>
+</div>
+
+<div class="grid g-2">
+<div class="card">
+<div class="ch"><h2 class="ct">Context</h2></div>
+<div class="tw"><table class="t">
+<thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+<tbody>
+{% for c in v.context %}
+<tr><td class="k">{{ c.field }}</td>
+<td{% if c.changed %} class="chg"{% endif %}>{% if c.link_before.is_empty() %}{{ c.before }}{% else %}<a href="{{ c.link_before }}">{{ c.before }}</a>{% endif %}</td>
+<td{% if c.changed %} class="chg"{% endif %}>{% if c.link_after.is_empty() %}{{ c.after }}{% else %}<a href="{{ c.link_after }}">{{ c.after }}</a>{% endif %}</td></tr>
+{% endfor %}
+</tbody></table></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<div class="card">
+<div class="ch"><h2 class="ct">Network</h2>{% if v.connected %}<span class="pill"><span class="dot dot-ok"></span>Connected</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Not connected</span>{% endif %}</div>
+<div class="kv">{% for n in v.net %}<div><span class="lbl">{{ n.0 }}</span><b>{{ n.1 }}</b>{% if !n.2.is_empty() %}<span class="sub">{{ n.2 }}</span>{% endif %}</div>{% endfor %}</div>
+</div>
+<div class="card">
+<div class="ch"><h2 class="ct">Marks</h2></div>
+{% if v.marks.is_empty() %}<div class="empty">No marks</div>{% else %}
+<div class="tw"><table class="t"><tbody>
+{% for mk in v.marks %}<tr><td class="mono">{{ mk.t }}</td><td class="muted r">{{ mk.off }}</td><td>{{ mk.label }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+</div>
+</div>
+
+<div class="card">
+<div class="ch"><h2 class="ct"><a href="{{ v.client_url }}">{{ v.client }}</a> · around this freeze</h2></div>
+{% if v.around.is_empty() %}<div class="empty">No events</div>{% else %}
+<div class="tw"><table class="t">
+<thead><tr><th>Time</th><th>Type</th><th>Account</th><th>Layout</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th class="r">Server</th></tr></thead>
+<tbody>
+{% for r in v.around %}
+<tr{% if r.id == v.id %} style="background: var(--sel)"{% endif %}><td class="mono">{% if r.url.is_empty() %}{{ r.t }}{% else %}<a class="lite" href="{{ r.url }}">{{ r.t }}</a>{% endif %}</td>
+<td>{{ r.kind }}</td>
+<td><a href="{{ r.user_url }}" class="mono">{{ r.account }}</a> <span class="muted">{{ r.user }}</span></td>
+<td><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
+<td>{% if r.script_url.is_empty() %}<span class="muted">{{ r.script }}</span>{% else %}<a class="lite" href="{{ r.script_url }}">{{ r.script }}</a>{% endif %}</td>
+<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td><td class="r">{{ r.pct }}</td></tr>
+{% endfor %}
+</tbody></table></div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

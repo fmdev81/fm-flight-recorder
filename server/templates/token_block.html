@@ -1,0 +1,5 @@
+<div id="token-block" class="rowc">
+<input id="srv-token" class="inp mono" type="{% if v.show %}text{% else %}password{% endif %}" value="{{ v.token }}" readonly style="flex: 1 1 220px; max-width: 300px" aria-label="Event token">
+<button type="button" class="btn" id="token-toggle">{% if v.show %}Hide{% else %}Show{% endif %}</button>
+<button type="button" class="btn" hx-post="/setup/token" hx-target="#token-block" hx-swap="outerHTML" hx-confirm="Make a new Event token?">New token</button>
+</div>
