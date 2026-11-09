@@ -1,7 +1,7 @@
 //! JSONL event log in ~/Library/Logs/FlightRecorder/.
 //!
 //! One JSON object per line. The schema is versioned (`v`) and documented in
-//! README.md. Writing happens on a background thread, never on FileMaker's
+//! docs/design.md. Writing happens on a background thread, never on FileMaker's
 //! main thread.
 
 use crate::context::Context;

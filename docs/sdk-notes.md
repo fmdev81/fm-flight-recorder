@@ -2,7 +2,10 @@
 
 Written 2026-11-08 on an arm64 Mac with FileMaker Pro 26.0.3 installed. "Checked here" means
 I checked it on this Mac (files, headers, binaries), not by running FileMaker. "Unconfirmed"
-means no source says so and it needs the test in the README.
+means no source says so and it needs the test plan in [design.md](design.md#test-plan-for-the-three-feasibility-questions).
+Later, the plug-in loaded and recorded freezes in FileMaker Pro 26.0.3 on macOS (see the
+Status section in [README.md](../README.md#status)). These notes do not mark items as
+confirmed from that run.
 
 ## 1. Where the SDK comes from, and what is on this Mac
 
@@ -19,7 +22,7 @@ means no source says so and it needs the test in the README.
   - `README.txt`: sample build environments, links on signing, script step XML.
 - **License.** The header grants a limited license "solely to enable licensees of Claris
   FileMaker Pro to compile plug-ins". So the SDK is **not committed** here. It sits in `sdk/`
-  (gitignored), and `README.md` says how to fetch it.
+  (gitignored), and [design.md](design.md#build) says how to fetch it.
   (https://docs.rs/crate/fm_plugin/0.1.17/source/headers/FMXExtern.h)
 - **Before the download, no SDK headers were on this Mac** (checked here: `find /` for
   `FMXExtern.h`). But FileMaker Pro.app ships
@@ -149,7 +152,7 @@ with Claris.
 - The SDK sample's `Do_PluginIdle` switches on all five but has an empty body.
 - How often idle is sent, and whether it is sent during a long layout draw or calc, is not
   documented (**unconfirmed**). The recorder records what it sees (`heartbeats` in
-  `session_stop`), and the README test plan measures it.
+  `session_stop`), and the test plan in [design.md](design.md#test-plan-for-the-three-feasibility-questions) measures it.
 
 **External functions.** Registered with:
 
@@ -270,7 +273,7 @@ from inside it.**
   right after each freeze, we build an `ExprEnv`, bind it with `cCurrentEnv` and read 9
   `Get()` values with `EvaluateGetFunction`. No calculation parsing is involved.
 - **Cost.** The capture time is logged with every context (`capture_us`). Measuring it inside
-  FileMaker is test (b) in the README. The freeze detection itself never calls FileMaker.
+  FileMaker is test (b) in [design.md](design.md#test-plan-for-the-three-feasibility-questions). The freeze detection itself never calls FileMaker.
 - **The limit.** A trigger that freezes the UI right away (OnRecordLoad, OnLayoutEnter) may
   not appear as `Get(ScriptName)` in either context, because no safe idle happens while it
   runs. The simulator shows this case. Mitigations:
