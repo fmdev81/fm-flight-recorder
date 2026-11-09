@@ -172,23 +172,26 @@ struct Inner {
     pending: Vec<Pending>,
 }
 
-/// Mono ns -> wall clock.
+/// Mono ns -> wall clock. It reads the wall clock at each call and goes back
+/// by the monotonic time since `mono`. A wall time fixed at start is wrong
+/// after the Mac sleeps (Instant does not count sleep on macOS) or after a
+/// clock change.
 #[derive(Clone, Copy)]
-struct Clock {
-    mono0: u64,
-    unix_ms0: i64,
-}
+struct Clock;
 impl Clock {
     fn now() -> Self {
-        Self {
-            mono0: mono_ns(),
-            unix_ms0: crate::eventlog::unix_ms_now(),
-        }
+        Self
     }
     fn iso(&self, mono: u64) -> String {
-        let delta_ms = (mono as i128 - self.mono0 as i128) / 1_000_000;
-        iso_from_unix_ms(self.unix_ms0 + delta_ms as i64)
+        iso_from_unix_ms(wall_ms_at(mono, mono_ns(), crate::eventlog::unix_ms_now()))
     }
+}
+
+/// Wall ms of the monotonic instant `mono`, given the current monotonic and
+/// wall times.
+fn wall_ms_at(mono: u64, now_mono: u64, now_unix_ms: i64) -> i64 {
+    let back_ms = (now_mono as i128 - mono as i128) / 1_000_000;
+    now_unix_ms - back_ms as i64
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -580,6 +583,29 @@ fn watchdog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wall_time_follows_offset_jump() {
+        const MS: u64 = 1_000_000;
+        // Session start: mono 1 s, wall 2025-11-08T14:00:00.000Z.
+        let start_wall = 1_762_610_400_000;
+        assert_eq!(wall_ms_at(1_000 * MS, 1_000 * MS, start_wall), start_wall);
+        // 10 s awake, then the Mac sleeps 1 h: mono +10 s, wall +3610 s.
+        let now_mono = 11_000 * MS;
+        let now_wall = start_wall + 3_610_000;
+        // An event now gets the real wall time, not start + 10 s.
+        assert_eq!(wall_ms_at(now_mono, now_mono, now_wall), now_wall);
+        // A freeze that started 4.2 s (mono) ago.
+        assert_eq!(
+            iso_from_unix_ms(wall_ms_at(now_mono - 4_200 * MS, now_mono, now_wall)),
+            "2025-11-08T15:00:05.800Z"
+        );
+        // A clock change (NTP) back by 2 s is followed too.
+        assert_eq!(
+            wall_ms_at(now_mono, now_mono, now_wall - 2_000),
+            now_wall - 2_000
+        );
+    }
 
     #[test]
     fn options_parse() {
