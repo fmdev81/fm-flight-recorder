@@ -8,7 +8,13 @@
 //! * watchdog: polls the heartbeat every `poll_ms`, runs the [`StallDetector`].
 //! * net sampler: reads TCP counters every `net_sample_ms`.
 //! * writer: gives each event its `seq`, appends JSONL lines. It also reads
-//!   the client identity (install id on disk, computer name) at start.
+//!   the client identity (install id on disk, computer name) at start. With
+//!   an endpoint, it then hands each line to the sender queue.
+//! * sender (only with an endpoint): posts batches, see [`crate::sender`].
+//!
+//! The channel to the writer is bounded ([`EVENT_QUEUE_MAX`]). The main
+//! thread uses `try_send`: if the writer cannot keep up, the event is lost
+//! and counted, and FileMaker never waits.
 
 use crate::context::{CaptureGate, Context};
 use crate::detector::{BusySpan, Sample, StallDetector, Transition};
@@ -18,7 +24,7 @@ use crate::wire::{ClientInfo, EventLine};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::*};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -98,7 +104,23 @@ pub struct Config {
     pub client: String,
     /// Folder for the install id.
     pub state_dir: PathBuf,
+    /// Sending (with `endpoint`): a batch goes out at most this long after
+    /// its first event, or at `send_batch_max` events.
+    pub send_interval_ms: u64,
+    pub send_batch_max: usize,
+    /// Events kept in memory for sending; the oldest go first when full.
+    pub send_queue_max: usize,
+    pub send_connect_ms: u64,
+    /// Read/write timeout of one post.
+    pub send_io_ms: u64,
+    /// Wait after a failed post.
+    pub send_retry_ms: u64,
 }
+
+/// Events waiting for the writer thread. Full = lost and counted.
+pub const EVENT_QUEUE_MAX: usize = 4096;
+/// The longest that stop waits for the sender thread before it detaches it.
+pub const SENDER_STOP_WAIT: Duration = Duration::from_millis(20);
 
 /// A parsed `endpoint=` value. Plain HTTP only (#7); HTTPS is #55.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,6 +213,12 @@ impl Default for Config {
             token: String::new(),
             client: String::new(),
             state_dir: crate::identity::default_state_dir(),
+            send_interval_ms: 5000,
+            send_batch_max: 200,
+            send_queue_max: 5000,
+            send_connect_ms: 1000,
+            send_io_ms: 3000,
+            send_retry_ms: 1000,
         }
     }
 }
@@ -312,6 +340,8 @@ struct Shared {
     want_context: AtomicBool,
     /// ns of the start of the stall in progress, 0 if none.
     stall_since_ns: AtomicU64,
+    /// Events lost because the writer channel was full.
+    events_lost: AtomicU64,
 }
 
 struct Pending {
@@ -371,7 +401,7 @@ pub struct Recorder {
     cfg: Config,
     shared: Arc<Shared>,
     inner: Arc<Mutex<Inner>>,
-    tx: Mutex<Option<Sender<Event>>>,
+    tx: Mutex<Option<SyncSender<Event>>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
     clock: Clock,
     writer_dir: PathBuf,
@@ -379,6 +409,7 @@ pub struct Recorder {
     /// Set by the writer thread once it has read the identity.
     client_info: Arc<OnceLock<ClientInfo>>,
     last_seq: Arc<AtomicU64>,
+    sender: Option<Arc<crate::sender::Sender>>,
 }
 
 impl Recorder {
@@ -394,6 +425,7 @@ impl Recorder {
             running: AtomicBool::new(true),
             want_context: AtomicBool::new(true),
             stall_since_ns: AtomicU64::new(0),
+            events_lost: AtomicU64::new(0),
         });
         let inner = Arc::new(Mutex::new(Inner {
             last_context: Context::default(),
@@ -402,13 +434,32 @@ impl Recorder {
             pending: Vec::new(),
         }));
         let net = Arc::new(Mutex::new(NetHistory::new(120)));
-        let (tx, rx) = channel::<Event>();
+        let (tx, rx) = sync_channel::<Event>(EVENT_QUEUE_MAX);
         let mut threads = Vec::new();
 
         // Writer.
         let session_id = crate::identity::random_id();
         let client_info = Arc::new(OnceLock::new());
         let last_seq = Arc::new(AtomicU64::new(0));
+        let sender = cfg.endpoint.clone().map(|endpoint| {
+            Arc::new(crate::sender::Sender::start(
+                crate::sender::SendSettings {
+                    endpoint,
+                    token: cfg.token.clone(),
+                    interval: Duration::from_millis(cfg.send_interval_ms),
+                    batch_max: cfg.send_batch_max.clamp(1, crate::wire::MAX_BATCH_EVENTS),
+                    batch_bytes: crate::wire::MAX_BATCH_BYTES / 2,
+                    queue_max: cfg.send_queue_max,
+                    timeouts: crate::http::Timeouts {
+                        connect: Duration::from_millis(cfg.send_connect_ms),
+                        io: Duration::from_millis(cfg.send_io_ms),
+                    },
+                    retry: Duration::from_millis(cfg.send_retry_ms),
+                },
+                session_id.clone(),
+                client_info.clone(),
+            ))
+        });
         {
             let w = WriterThread {
                 writer: LogWriter::new(cfg.log_dir.clone()),
@@ -418,6 +469,7 @@ impl Recorder {
                 app: cfg.app.clone(),
                 client_info: client_info.clone(),
                 last_seq: last_seq.clone(),
+                sender: sender.clone(),
             };
             threads.push(
                 thread::Builder::new()
@@ -467,7 +519,7 @@ impl Recorder {
             );
         }
 
-        let _ = tx.send(Event::SessionStart {
+        let _ = tx.try_send(Event::SessionStart {
             ts: clock.iso(mono_ns()),
             pid: std::process::id(),
             app: cfg.app.clone(),
@@ -494,7 +546,18 @@ impl Recorder {
             session_id,
             client_info,
             last_seq,
+            sender,
         }
+    }
+
+    /// The sender, when an endpoint is set.
+    pub fn sender(&self) -> Option<&crate::sender::Sender> {
+        self.sender.as_deref()
+    }
+
+    /// Events lost because the writer could not keep up.
+    pub fn events_lost(&self) -> u64 {
+        self.shared.events_lost.load(Relaxed)
     }
 
     pub fn session_id(&self) -> &str {
@@ -624,7 +687,7 @@ impl Recorder {
 
     fn send(&self, e: Event) {
         if let Some(tx) = self.tx.lock().unwrap().as_ref() {
-            let _ = tx.send(e);
+            send_or_count(tx, e, &self.shared);
         }
     }
 
@@ -656,11 +719,20 @@ impl Recorder {
             heartbeats: self.shared.beats.load(Relaxed),
             idle_messages: self.shared.idle_msgs.load(Relaxed),
         });
+        // The sender must not post any more: no network work at stop. Its
+        // socket is closed now; the writer hands the unsent events over.
+        let t0 = Instant::now();
+        if let Some(s) = &self.sender {
+            s.signal_stop();
+        }
         // The watchdog holds a Sender clone; it exits on `running == false`.
         *self.tx.lock().unwrap() = None;
         let threads: Vec<_> = self.threads.lock().unwrap().drain(..).collect();
         for t in threads {
             let _ = t.join();
+        }
+        if let Some(s) = &self.sender {
+            s.finish(SENDER_STOP_WAIT.saturating_sub(t0.elapsed()));
         }
     }
 }
@@ -680,10 +752,11 @@ struct WriterThread {
     app: String,
     client_info: Arc<OnceLock<ClientInfo>>,
     last_seq: Arc<AtomicU64>,
+    sender: Option<Arc<crate::sender::Sender>>,
 }
 
 impl WriterThread {
-    fn run(self, rx: std::sync::mpsc::Receiver<Event>) {
+    fn run(self, rx: Receiver<Event>) {
         let (info, _id_err) = crate::identity::resolve(&self.state_dir, &self.client, &self.app);
         let info = self.client_info.get_or_init(|| info).clone();
         let mut seq = 0u64;
@@ -711,7 +784,28 @@ impl WriterThread {
             let text = serde_json::to_string(&line).expect("event serializes");
             let _ = self.writer.write_str(&text);
             self.last_seq.store(seq, Relaxed);
+            if let Some(s) = &self.sender {
+                let dropped = s.queue.push(seq, text);
+                if dropped > 0 {
+                    s.stats.dropped.fetch_add(dropped, Relaxed);
+                }
+            }
         }
+        // Stop: the events that were not sent stay in the JSONL log only.
+        if let Some(s) = &self.sender {
+            let left = s.queue.close();
+            if !left.is_empty() {
+                s.stats.dropped.fetch_add(left.len() as u64, Relaxed);
+                s.stats
+                    .set_error(format!("{} events not sent at stop", left.len()));
+            }
+        }
+    }
+}
+
+fn send_or_count(tx: &SyncSender<Event>, e: Event, s: &Shared) {
+    if let Err(TrySendError::Full(_)) = tx.try_send(e) {
+        s.events_lost.fetch_add(1, Relaxed);
     }
 }
 
@@ -720,7 +814,7 @@ fn watchdog(
     s: Arc<Shared>,
     inner: Arc<Mutex<Inner>>,
     net: Arc<Mutex<NetHistory>>,
-    tx: Sender<Event>,
+    tx: SyncSender<Event>,
     clock: Clock,
 ) {
     let mut det = StallDetector::new(cfg.threshold_ms);
@@ -804,7 +898,7 @@ fn watchdog(
                     i.pending.drain(..).partition(|p| p.deadline_ns <= now);
                 i.pending = keep;
                 for p in late {
-                    let _ = tx.send(p.event);
+                    send_or_count(&tx, p.event, &s);
                 }
             }
             if busy_ctx.is_empty() || level != Level::ScriptRunning {
@@ -816,13 +910,17 @@ fn watchdog(
         if let Some((a, b)) = busy.on_level(now, level == Level::ScriptRunning) {
             if b - a >= threshold_ns {
                 let netw = net.lock().map(|n| n.window(a, b)).unwrap_or_default();
-                let _ = tx.send(Event::ScriptBusy {
-                    ts: clock.iso(a),
-                    end_ts: clock.iso(b),
-                    duration_ms: (b - a) / 1_000_000,
-                    before: busy_ctx.clone(),
-                    net: netw,
-                });
+                send_or_count(
+                    &tx,
+                    Event::ScriptBusy {
+                        ts: clock.iso(a),
+                        end_ts: clock.iso(b),
+                        duration_ms: (b - a) / 1_000_000,
+                        before: busy_ctx.clone(),
+                        net: netw,
+                    },
+                    &s,
+                );
             }
         }
     }

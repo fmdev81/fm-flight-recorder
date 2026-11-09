@@ -41,8 +41,25 @@ CFRunLoopObserver ──► beat()/sleeping         "awake and silent ≥ 250 ms
 safe idle, ≤ every 250 ms:                  fr-net: every 2 ms getsockopt(TCP_CONNECTION_INFO)
   Get(LayoutName…) ──► context                on FileMaker's own sockets to port 5003:
 FlightRecorder_Mark(label) ──► mark           round trips + request→reply wait
-                                            fr-writer: JSONL → ~/Library/Logs/FlightRecorder/
+                                            fr-writer: seq + JSONL → ~/Library/Logs/FlightRecorder/
+                                              then (with endpoint=) the send queue
+                                            fr-sender: batches → POST /api/v1/events
 ```
+
+- **Sending.** Only with `endpoint=` and `token=` ([ingest-api.md](ingest-api.md)). The JSONL log
+  is the primary record; sending is extra. FileMaker's main thread never touches the network or
+  the send queue: its calls only `try_send` into a bounded channel (4096 events) to the writer.
+  - The writer writes each line to the log, then adds it to the send queue (5000 events; when
+    it is full the oldest event is dropped and counted).
+  - `fr-sender` posts a batch at 200 events, or 5 s after the first waiting event. Connect
+    timeout 1 s, read/write timeout 3 s, one plain-HTTP connection for each post. A batch
+    stays in the queue until the server accepts it (`200`), or refuses it (`400`/`413`:
+    dropped and counted). Other failures are tried again after 1 s. `401` stops sending
+    until the next `FlightRecorder_Start`.
+  - **Stop never waits for the network.** `FlightRecorder_Stop` and `kFMXT_Shutdown` close the
+    sender's socket, so a blocked read or write ends at once. They wait at most 20 ms for the
+    thread; if it is still in `connect`, they detach it and it ends at its connect timeout.
+    Events not sent at stop stay in the log only.
 
 - **Freeze.** The main run loop is awake and has not come back for at least `threshold` ms
   (default 250). If the run loop is asleep, FileMaker is idle, not frozen.
@@ -64,6 +81,7 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `src/net.rs` | Turn counter, net history, macOS in-process TCP probe |
 | `src/eventlog.rs` | JSONL schema and writer |
 | `src/recorder.rs` | Threads, the main-thread API, options |
+| `src/sender.rs`, `src/http.rs` | Send queue and `fr-sender` thread; a small HTTP/1.1 client (std only) |
 | `src/wire.rs` | Wire types of the ingest API ([ingest-api.md](ingest-api.md)) |
 | `src/identity.rs` | Install id (kept in `~/Library/Application Support/FlightRecorder/install-id`), session id, computer name, OS version |
 | `src/runloop.rs` | `CFRunLoopObserver` heartbeat (plus timer helpers for the simulator) |
