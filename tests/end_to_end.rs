@@ -94,7 +94,11 @@ fn probe_ignores_other_ports() {
 fn read_events(dir: &std::path::Path) -> Vec<Event> {
     let mut out = Vec::new();
     for f in std::fs::read_dir(dir).unwrap() {
-        let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
+        let p = f.unwrap().path();
+        if p.extension().is_none_or(|e| e != "jsonl") {
+            continue; // the state/ folder with the install id
+        }
+        let text = std::fs::read_to_string(p).unwrap();
         out.extend(text.lines().filter_map(parse_line));
     }
     out
@@ -111,6 +115,7 @@ fn recorder_logs_a_freeze_with_context_and_round_trips() {
         net_port: Some(port),
         net_sample_ms: 1,
         log_dir: dir.clone(),
+        state_dir: dir.join("state"),
         app: "test".into(),
         ..Default::default()
     };
@@ -194,6 +199,7 @@ fn idle_gaps_while_run_loop_sleeps_are_not_freezes() {
         poll_ms: 5,
         net_port: None,
         log_dir: dir.clone(),
+        state_dir: dir.join("state"),
         ..Default::default()
     };
     let rec = Recorder::start(cfg, fm_flight_recorder::default_probe(None));
@@ -216,6 +222,7 @@ fn long_script_is_logged_as_script_busy() {
         poll_ms: 5,
         net_port: None,
         log_dir: dir.clone(),
+        state_dir: dir.join("state"),
         ..Default::default()
     };
     let rec = Recorder::start(cfg, fm_flight_recorder::default_probe(None));

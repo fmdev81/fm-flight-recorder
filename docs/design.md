@@ -63,6 +63,7 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `src/eventlog.rs` | JSONL schema and writer |
 | `src/recorder.rs` | Threads, the main-thread API, options |
 | `src/wire.rs` | Wire types of the ingest API ([ingest-api.md](ingest-api.md)) |
+| `src/identity.rs` | Install id (kept in `~/Library/Application Support/FlightRecorder/install-id`), session id, computer name, OS version |
 | `src/runloop.rs` | `CFRunLoopObserver` heartbeat (plus timer helpers for the simulator) |
 | `src/fmxabi.rs` | FMX ABI facts (struct layout, constants, options string), tested without FileMaker |
 | `src/fmx/` | The plug-in glue (feature `fmx`): `FMExternCallProc`, external functions, FFI to FMWrapper |
@@ -202,7 +203,7 @@ If FileMaker does not list the plug-in, check:
 ### Log format (`~/Library/Logs/FlightRecorder/flight-YYYY-MM-DD.jsonl`, schema `v: 1`)
 
 ```json
-{"v":1,"type":"freeze","ts":"2026-11-08T16:45:01.012Z","end_ts":"2026-11-08T16:45:03.013Z","duration_ms":2001,
+{"v":1,"session_id":"b6d0c1e2f3a4958677a8b9c0d1e2f3a4","seq":7,"type":"freeze","ts":"2026-11-08T16:45:01.012Z","end_ts":"2026-11-08T16:45:03.013Z","duration_ms":2001,
  "level":"user_not_idle",
  "before":{"file":"Invoices","layout":"Customers | List","layout_table":"Customers","account":"demo","user":"Demo User","window":"Invoices","host":"…","mode":"0","captured_ms":12345,"capture_us":41},
  "after":{…},
@@ -210,11 +211,20 @@ If FileMaker does not list the plug-in, check:
  "marks":["go to Invoices"]}
 ```
 
+Every line has:
+
+- `v`: the schema version (1). New optional fields do not change it ([ingest-api.md](ingest-api.md#schema-versions)).
+- `session_id`: 32 random hex characters, new at each start of the recorder.
+- `seq`: 1, 2, 3, … in the session, in the order the lines are written. (`session_id`, `seq`) is
+  the id of the event; the server uses it to drop duplicates.
+
+Lines written before the ingest API have no `session_id` and no `seq`.
+
 Other types:
 
 | Type | Fields |
 |---|---|
-| `session_start` | app version, threshold, heartbeat sources, port |
+| `session_start` | pid, app version, plug-in version, threshold, heartbeat sources, port, `client` (the `client=` option, else the macOS computer name), `install_id`, `machine` (host name), `os` |
 | `script_busy` | `ts`, `end_ts`, `duration_ms`, `before`, `net` |
 | `mark` | `label`, `context` |
 | `session_stop` | freezes, heartbeats |

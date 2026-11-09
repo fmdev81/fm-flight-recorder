@@ -7,12 +7,14 @@
 //!   atomics or a mutex that nothing holds for long; no I/O.
 //! * watchdog: polls the heartbeat every `poll_ms`, runs the [`StallDetector`].
 //! * net sampler: reads TCP counters every `net_sample_ms`.
-//! * writer: appends JSONL lines.
+//! * writer: gives each event its `seq`, appends JSONL lines. It also reads
+//!   the client identity (install id on disk, computer name) at start.
 
 use crate::context::{CaptureGate, Context};
 use crate::detector::{BusySpan, Sample, StallDetector, Transition};
-use crate::eventlog::{iso_from_unix_ms, Event, LogWriter};
+use crate::eventlog::{iso_from_unix_ms, Event, LogWriter, SCHEMA_VERSION};
 use crate::net::{NetHistory, NetProbe};
+use crate::wire::{ClientInfo, EventLine};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::*};
@@ -94,6 +96,8 @@ pub struct Config {
     pub token: String,
     /// Client name (`client=`). Empty = the macOS computer name.
     pub client: String,
+    /// Folder for the install id.
+    pub state_dir: PathBuf,
 }
 
 /// A parsed `endpoint=` value. Plain HTTP only (#7); HTTPS is #55.
@@ -186,6 +190,7 @@ impl Default for Config {
             endpoint: None,
             token: String::new(),
             client: String::new(),
+            state_dir: crate::identity::default_state_dir(),
         }
     }
 }
@@ -351,8 +356,11 @@ pub struct Status {
     pub log: String,
     /// The companion server, empty if not set. The token is never shown.
     pub endpoint: String,
-    /// The `client=` option, empty if not set.
+    /// The client name: `client=`, else the macOS computer name.
     pub client: String,
+    pub session_id: String,
+    /// `seq` of the last event written.
+    pub last_seq: u64,
     pub last_context: Context,
 }
 
@@ -364,6 +372,10 @@ pub struct Recorder {
     threads: Mutex<Vec<JoinHandle<()>>>,
     clock: Clock,
     writer_dir: PathBuf,
+    session_id: String,
+    /// Set by the writer thread once it has read the identity.
+    client_info: Arc<OnceLock<ClientInfo>>,
+    last_seq: Arc<AtomicU64>,
 }
 
 impl Recorder {
@@ -391,17 +403,26 @@ impl Recorder {
         let mut threads = Vec::new();
 
         // Writer.
-        let writer = LogWriter::new(cfg.log_dir.clone());
-        threads.push(
-            thread::Builder::new()
-                .name("fr-writer".into())
-                .spawn(move || {
-                    for e in rx {
-                        let _ = writer.write(&e);
-                    }
-                })
-                .expect("spawn writer"),
-        );
+        let session_id = crate::identity::random_id();
+        let client_info = Arc::new(OnceLock::new());
+        let last_seq = Arc::new(AtomicU64::new(0));
+        {
+            let w = WriterThread {
+                writer: LogWriter::new(cfg.log_dir.clone()),
+                session_id: session_id.clone(),
+                state_dir: cfg.state_dir.clone(),
+                client: cfg.client.clone(),
+                app: cfg.app.clone(),
+                client_info: client_info.clone(),
+                last_seq: last_seq.clone(),
+            };
+            threads.push(
+                thread::Builder::new()
+                    .name("fr-writer".into())
+                    .spawn(move || w.run(rx))
+                    .expect("spawn writer"),
+            );
+        }
 
         // Net sampler.
         if cfg.net_port.is_some() {
@@ -451,6 +472,11 @@ impl Recorder {
             threshold_ms: cfg.threshold_ms,
             heartbeat: cfg.heartbeat.clone(),
             port: cfg.net_port.unwrap_or(0),
+            // Filled in by the writer thread (it reads the disk).
+            client: String::new(),
+            install_id: String::new(),
+            machine: String::new(),
+            os: String::new(),
         });
 
         let writer_dir = cfg.log_dir.clone();
@@ -462,7 +488,19 @@ impl Recorder {
             threads: Mutex::new(threads),
             clock,
             writer_dir,
+            session_id,
+            client_info,
+            last_seq,
         }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// The client identity, once the writer thread has read it.
+    pub fn client_info(&self) -> Option<&ClientInfo> {
+        self.client_info.get()
     }
 
     pub fn config(&self) -> &Config {
@@ -566,7 +604,13 @@ impl Recorder {
                 .as_ref()
                 .map(Endpoint::url)
                 .unwrap_or_default(),
-            client: self.cfg.client.clone(),
+            client: self
+                .client_info
+                .get()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| self.cfg.client.clone()),
+            session_id: self.session_id.clone(),
+            last_seq: self.last_seq.load(Relaxed),
             last_context: self
                 .inner
                 .lock()
@@ -621,6 +665,50 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+/// The log writer thread: numbers the events and writes them.
+struct WriterThread {
+    writer: LogWriter,
+    session_id: String,
+    state_dir: PathBuf,
+    client: String,
+    app: String,
+    client_info: Arc<OnceLock<ClientInfo>>,
+    last_seq: Arc<AtomicU64>,
+}
+
+impl WriterThread {
+    fn run(self, rx: std::sync::mpsc::Receiver<Event>) {
+        let (info, _id_err) = crate::identity::resolve(&self.state_dir, &self.client, &self.app);
+        let info = self.client_info.get_or_init(|| info).clone();
+        let mut seq = 0u64;
+        for mut event in rx {
+            if let Event::SessionStart {
+                client,
+                install_id,
+                machine,
+                os,
+                ..
+            } = &mut event
+            {
+                client.clone_from(&info.name);
+                install_id.clone_from(&info.install_id);
+                machine.clone_from(&info.machine);
+                os.clone_from(&info.os);
+            }
+            seq += 1;
+            let line = EventLine {
+                v: SCHEMA_VERSION,
+                session_id: self.session_id.clone(),
+                seq,
+                event,
+            };
+            let text = serde_json::to_string(&line).expect("event serializes");
+            let _ = self.writer.write_str(&text);
+            self.last_seq.store(seq, Relaxed);
+        }
     }
 }
 
@@ -829,6 +917,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("fr-status-{}", std::process::id()));
         let mut cfg = Config {
             log_dir: dir.clone(),
+            state_dir: dir.join("state"),
             net_port: None,
             ..Default::default()
         };
@@ -842,6 +931,84 @@ mod tests {
         );
         assert!(json.contains("\"client\":\"Desk 4\""), "{json}");
         assert!(!json.contains("secret-token"), "{json}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn read_lines(dir: &std::path::Path) -> Vec<EventLine> {
+        let mut out = Vec::new();
+        for f in std::fs::read_dir(dir).unwrap() {
+            let p = f.unwrap().path();
+            if p.extension().is_some_and(|e| e == "jsonl") {
+                let text = std::fs::read_to_string(p).unwrap();
+                out.extend(
+                    text.lines()
+                        .map(|l| serde_json::from_str::<EventLine>(l).unwrap()),
+                );
+            }
+        }
+        out.sort_by_key(|l| l.seq);
+        out
+    }
+
+    #[test]
+    fn events_get_session_id_seq_and_identity() {
+        let dir = std::env::temp_dir().join(format!("fr-ident-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg = Config {
+            log_dir: dir.join("a"),
+            state_dir: dir.join("state"),
+            net_port: None,
+            app: "Pro 26.0.3".into(),
+            ..Default::default()
+        };
+        let rec = Recorder::start(cfg.clone(), Box::new(crate::net::NoProbe));
+        rec.mark("one", Context::default());
+        rec.mark("two", Context::default());
+        let st = rec.stop();
+        let sid = rec.session_id().to_string();
+        assert_eq!(st.session_id, sid);
+        assert_eq!(st.last_seq, 4);
+        assert_eq!(st.client, crate::identity::computer_name());
+
+        let lines = read_lines(&dir.join("a"));
+        assert_eq!(
+            lines.iter().map(|l| l.seq).collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        assert!(lines.iter().all(|l| l.session_id == sid && l.v == 1));
+        let Event::SessionStart {
+            client,
+            install_id,
+            machine,
+            os,
+            app,
+            ..
+        } = &lines[0].event
+        else {
+            panic!("{:?}", lines[0]);
+        };
+        let kept = std::fs::read_to_string(dir.join("state/install-id")).unwrap();
+        assert_eq!(install_id, kept.trim());
+        assert_eq!(client, &crate::identity::computer_name());
+        assert!(!machine.is_empty() && !os.is_empty());
+        assert_eq!(app, "Pro 26.0.3");
+        assert!(matches!(lines[3].event, Event::SessionStop { .. }));
+
+        // A new start: new session, seq from 1, same install id; client= wins.
+        let cfg2 = Config {
+            log_dir: dir.join("b"),
+            client: "Desk 4".into(),
+            ..cfg
+        };
+        let rec2 = Recorder::start(cfg2, Box::new(crate::net::NoProbe));
+        rec2.stop();
+        assert_ne!(rec2.session_id(), sid);
+        let lines2 = read_lines(&dir.join("b"));
+        assert_eq!(lines2[0].seq, 1);
+        assert!(matches!(
+            &lines2[0].event,
+            Event::SessionStart { client, install_id: i2, .. } if client == "Desk 4" && i2 == install_id
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

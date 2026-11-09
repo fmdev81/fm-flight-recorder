@@ -26,6 +26,18 @@ pub enum Event {
         threshold_ms: u64,
         heartbeat: String,
         port: u16,
+        /// Client name: `client=` or the macOS computer name.
+        #[serde(default)]
+        client: String,
+        /// Random id kept on disk; the server keys clients on it.
+        #[serde(default)]
+        install_id: String,
+        /// Host name.
+        #[serde(default)]
+        machine: String,
+        /// e.g. "macOS 26.0.1".
+        #[serde(default)]
+        os: String,
     },
     /// The main thread did not respond for `duration_ms`.
     Freeze {
@@ -117,12 +129,18 @@ impl LogWriter {
     }
 
     pub fn write(&self, e: &Event) -> std::io::Result<PathBuf> {
+        self.write_str(&to_line(e))
+    }
+
+    /// Append one JSON line (without its newline).
+    pub fn write_str(&self, line: &str) -> std::io::Result<PathBuf> {
         fs::create_dir_all(&self.dir)?;
         let path = self.path_for_now();
         let mut f = OpenOptions::new().create(true).append(true).open(&path)?;
-        let mut line = to_line(e);
-        line.push('\n');
-        f.write_all(line.as_bytes())?;
+        let mut buf = String::with_capacity(line.len() + 1);
+        buf.push_str(line);
+        buf.push('\n');
+        f.write_all(buf.as_bytes())?;
         Ok(path)
     }
 }
