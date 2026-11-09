@@ -2,7 +2,7 @@
 """Print one line per freeze from Flight Recorder JSONL logs.
 
     python3 scripts/summary.py                      # today's log in ~/Library/Logs/FlightRecorder
-    python3 scripts/summary.py viewer/demo.jsonl    # any log file(s)
+    python3 scripts/summary.py demo-logs/*.jsonl     # any log file(s)
 """
 import glob, json, os, sys
 

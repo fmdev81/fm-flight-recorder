@@ -1,4 +1,4 @@
-//! fr-fakelog: write a realistic fake flight log, for demoing the viewer
+//! fr-fakelog: write a realistic fake flight log, for demos and tests
 //! without FileMaker.
 //!
 //!   cargo run --bin fr-fakelog -- [--seed N] [--hours H] [--out FILE]

@@ -111,9 +111,8 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `examples/bench_probe.rs` | Cost of the heartbeat and of a probe sample |
 | `src/bin/fakelog.rs` | `fr-fakelog`: writes a realistic fake log for demos |
 | `tests/` | End-to-end tests with the real recorder: `end_to_end.rs`, and `send.rs`, `spool.rs`, `ping.rs` with a local test receiver (`tests/common/`) |
-| `viewer/index.html` | Static viewer. `viewer/demo.html` is the same viewer with a fake log embedded (`viewer/demo.jsonl`). |
 | `packaging/Info.plist` | The bundle `Info.plist` template |
-| `scripts/` | `build-plugin.sh`, `install-plugin.sh`, `check-abi.sh` (with `check-abi.cpp`), `selftest-in-filemaker.sh`, `summary.py`, `make-demo-html.py` |
+| `scripts/` | `build-plugin.sh`, `install-plugin.sh`, `check-abi.sh` (with `check-abi.cpp`), `selftest-in-filemaker.sh`, `summary.py` |
 
 ## Build, install and try it
 
@@ -145,12 +144,9 @@ More install notes:
 ```sh
 cargo run --example simulate_host -- demo-logs     # real recorder, fake server, some freezes
 python3 scripts/summary.py demo-logs/*.jsonl
-open viewer/demo.html                               # viewer with a fake log embedded
 cargo run --bin fr-fakelog -- --hours 8 --seed 7 --out /tmp/day.jsonl   # another fake log
-python3 scripts/make-demo-html.py /tmp/day.jsonl /tmp/day.html && open /tmp/day.html
+python3 scripts/summary.py /tmp/day.jsonl
 ```
-
-`viewer/index.html` also opens any log by drag-and-drop or with **Open log…**.
 
 ### One-command load test (self-test mode)
 
