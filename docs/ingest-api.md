@@ -1,8 +1,12 @@
 # Event ingest API (v1)
 
 This document is the contract between the FlightRecorder plug-in (the client) and the
-companion server. The plug-in and the server use the same Rust types for it
-(`src/wire.rs` and `src/eventlog.rs` today; see [Shared types](#shared-types)).
+companion server. The Rust types of the contract are in `src/wire.rs` and `src/eventlog.rs`
+([Shared types](#shared-types)).
+
+- The plug-in side is built: `src/sender.rs`, `src/spool.rs` and `src/http.rs`.
+- **Not built yet:** the server ([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21), [#22](https://github.com/solutionscay/fm-flight-recorder/issues/22), [#23](https://github.com/solutionscay/fm-flight-recorder/issues/23)).
+  The tests use a small local receiver (`tests/common/mod.rs`).
 
 ## Summary
 
@@ -12,7 +16,7 @@ companion server. The plug-in and the server use the same Rust types for it
 | `POST /api/v1/ping` | yes | The client is alive, with its counters |
 | `GET /api/v1/health` | no | The server is up |
 
-- Transport: plain HTTP on the LAN (decision in #7). HTTPS is #55.
+- Transport: plain HTTP on the LAN. HTTPS is not built yet ([#55](https://github.com/solutionscay/fm-flight-recorder/issues/55)).
 - Body: JSON, UTF-8, `Content-Type: application/json`.
 - Times: UTC, ISO-8601 with milliseconds and `Z`, for example `2026-11-08T14:03:07.215Z`.
   The JSONL log uses the same format.
@@ -27,8 +31,7 @@ Each request to `/api/v1/events` and `/api/v1/ping` has this header:
 Authorization: Bearer <event token>
 ```
 
-The Setup page of the server shows the Event token. The FileMaker startup script gives it to
-the plug-in:
+The server makes one Event token. The FileMaker startup script gives it to the plug-in:
 
 ```
 FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>" )
@@ -180,8 +183,8 @@ There are two version numbers:
 
 Rules:
 
-- A new field that readers can ignore does not change `v`. The added `session_id`, `seq` and
-  client fields of `session_start` are this type of change, so the log stays at `v: 1`.
+- A new field that readers can ignore does not change `v`. For example, `session_id`, `seq`
+  and the client fields of `session_start` are optional, and the log is `v: 1`.
 - A new event `type` does not change `v`.
 - A change that an old reader would read wrongly (a field with a new meaning, a removed
   field, a new unit) increments the event `v`. The server must read all event versions that
@@ -191,10 +194,7 @@ Rules:
 
 ## Shared types
 
-Decided in #1 and #3: the server is Rust (axum, rusqlite) in this repository, in a Cargo
-workspace. One set of serde types is used by both sides, so the format cannot drift.
-
-Today the types are in the plug-in crate:
+The serde types of the contract are in the plug-in crate:
 
 | Type | File | What |
 |---|---|---|
@@ -205,12 +205,8 @@ Today the types are in the plug-in crate:
 | `IngestReply`, `ErrorReply` | `src/wire.rs` | The reply bodies |
 | `MAX_BATCH_EVENTS`, `MAX_BATCH_BYTES` | `src/wire.rs` | The limits |
 
-Plan for #21 (server skeleton):
+The tests in `src/wire.rs` parse the JSON examples in this document. If the document and the
+types do not agree, the tests fail.
 
-1. Make the repository a Cargo workspace. The plug-in crate stays at the root.
-2. Move the types above into a small crate `fr-events` (folder `events/`). It depends only on
-   `serde` and `serde_json`, and has no FileMaker or network code.
-3. The plug-in crate re-exports the types from `fr-events` at the same paths
-   (`eventlog::Event`, `wire::EventBatch` and so on), so the plug-in code does not change.
-4. The server crate (`server/`) depends on `fr-events`.
-5. The tests in `src/wire.rs` move with the types. They parse the examples in this document.
+The server will be Rust, in a Cargo workspace in this repository. It will use the same types,
+so the format cannot drift ([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21)).

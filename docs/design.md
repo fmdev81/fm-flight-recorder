@@ -22,14 +22,20 @@ This plug-in records those.
 
 Status: **prototype.**
 - What is done:
-  - The core is unit-tested and end-to-end tested with real sockets and a real macOS run loop.
-  - The plug-in links against the official Claris SDK 26.0.3 `FMWrapper.framework`.
-  - The ABI is checked against the SDK headers.
-  - The plug-in loads in FileMaker Pro 26.0.3 on macOS.
-  - The plug-in records freezes in FileMaker Pro 26.0.3 on macOS.
+  - The core has unit tests and end-to-end tests with real sockets and a real macOS run loop.
+  - The plug-in links against the Claris SDK 26.0.3 `FMWrapper.framework`.
+    `scripts/check-abi.sh` checks the ABI against the SDK headers.
+  - The plug-in loads and records freezes in FileMaker Pro 26.0.3 on macOS.
+  - The plug-in can send its events to a companion server ([ingest-api.md](ingest-api.md)),
+    with an offline spool and a ping.
 - What is not done: a test with a file on FileMaker Server (the test plan below).
 
-Research, sources and the three feasibility answers: [docs/sdk-notes.md](sdk-notes.md).
+**Not built yet:** the companion server and its dashboard
+([#21](https://github.com/solutionscay/fm-flight-recorder/issues/21),
+[#22](https://github.com/solutionscay/fm-flight-recorder/issues/22),
+[#23](https://github.com/solutionscay/fm-flight-recorder/issues/23)).
+
+Research, sources and the three feasibility answers: [sdk-notes.md](sdk-notes.md).
 
 ## How it works
 
@@ -88,6 +94,7 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 
 | Path | What |
 |---|---|
+| `src/lib.rs` | Crate root: the module list |
 | `src/detector.rs` | Stall detector, a pure state machine fed with heartbeat samples |
 | `src/context.rs` | Context struct, `Get()` capture through a trait, rate gate |
 | `src/net.rs` | Turn counter, net history, macOS in-process TCP probe |
@@ -103,93 +110,47 @@ FlightRecorder_Mark(label) ──► mark           round trips + request→repl
 | `examples/simulate_host.rs` | Drives the real recorder like FileMaker would, with a fake server |
 | `examples/bench_probe.rs` | Cost of the heartbeat and of a probe sample |
 | `src/bin/fakelog.rs` | `fr-fakelog`: writes a realistic fake log for demos |
-| `viewer/index.html` | Static viewer. `viewer/demo.html` is the same viewer with the fake log embedded. |
-| `scripts/` | `build-plugin.sh`, `install-plugin.sh`, `check-abi.sh`, `summary.py`, `make-demo-html.py` |
+| `tests/` | End-to-end tests with the real recorder: `end_to_end.rs`, and `send.rs`, `spool.rs`, `ping.rs` with a local test receiver (`tests/common/`) |
+| `viewer/index.html` | Static viewer. `viewer/demo.html` is the same viewer with a fake log embedded (`viewer/demo.jsonl`). |
+| `packaging/Info.plist` | The bundle `Info.plist` template |
+| `scripts/` | `build-plugin.sh`, `install-plugin.sh`, `check-abi.sh` (with `check-abi.cpp`), `selftest-in-filemaker.sh`, `summary.py`, `make-demo-html.py` |
 
-## Build
+## Build, install and try it
 
-Requirements: Rust (stable, tested with 1.90), Xcode command line tools, and macOS on Apple Silicon or Intel.
+The steps for a new Mac are in [README.md](../README.md): the tools, the SDK download, the
+build, the tests, the ABI check, the install, and the Data Viewer checks in FileMaker Pro.
 
-```sh
-cargo test                          # 30 unit + 5 end-to-end tests; FileMaker not needed
+More build notes:
 
-# Get the Claris SDK (public download, no login). It is not committed: its license allows
-# use for compiling plug-ins only.
-mkdir -p sdk && cd sdk
-curl -LO https://downloads.claris.com/DEVREL/sdk/fm_plugin_sdk_26.0.3.307.zip
-unzip -q fm_plugin_sdk_26.0.3.307.zip && cd ..
-# Without sdk/, the build links against /Applications/FileMaker Pro.app's own FMWrapper.framework.
+- Without `sdk/`, `build.rs` links against the `FMWrapper.framework` in
+  `/Applications/FileMaker Pro.app`. `FMWRAPPER_FRAMEWORK_DIR` selects a different folder.
+- Without the `x86_64-apple-darwin` target, the bundle is arm64 only.
+- `scripts/build-plugin.sh` makes an ad-hoc signature. `SIGN_IDENTITY="Developer ID Application: …"`
+  selects a real identity. You do not need one on your own Mac.
 
-scripts/check-abi.sh                # our Rust struct and constants vs. the SDK headers
-scripts/build-plugin.sh             # → dist/FlightRecorder.fmplugin (universal, ad-hoc signed)
-```
+More install notes:
 
-To get the x86_64 slice: `rustup target add x86_64-apple-darwin`. Without it, the bundle is
-arm64 only.
-
-For a Developer ID signature:
-
-```sh
-SIGN_IDENTITY="Developer ID Application: …" scripts/build-plugin.sh
-```
-
-You do not need one on your own Mac.
+- FileMaker keeps the "Always load this plug-in" decision under **Settings > Permitted**.
+- **Gatekeeper.** A bundle built on this Mac has no quarantine attribute, so Gatekeeper does
+  not run. If you copy the bundle from another Mac or from a zip, run this before you start
+  FileMaker:
+  ```sh
+  xattr -dr com.apple.quarantine ~/Library/Application\ Support/FileMaker/Extensions/FlightRecorder.fmplugin
+  ```
+- The recorder **starts on its own** when FileMaker starts, with the default options. To turn
+  that off: `launchctl setenv FLIGHT_RECORDER_NO_AUTOSTART 1`, then restart FileMaker.
 
 ### Demo without FileMaker
 
 ```sh
-cargo run --example simulate_host -- demo-logs     # real recorder, fake server, 4 freezes
+cargo run --example simulate_host -- demo-logs     # real recorder, fake server, some freezes
 python3 scripts/summary.py demo-logs/*.jsonl
-open viewer/demo.html                               # viewer with a fake 3-hour log embedded
+open viewer/demo.html                               # viewer with a fake log embedded
 cargo run --bin fr-fakelog -- --hours 8 --seed 7 --out /tmp/day.jsonl   # another fake log
 python3 scripts/make-demo-html.py /tmp/day.jsonl /tmp/day.html && open /tmp/day.html
 ```
 
 `viewer/index.html` also opens any log by drag-and-drop or with **Open log…**.
-
-## Install and try it in FileMaker Pro
-
-1. **Quit FileMaker Pro.**
-2. Build and install:
-
-   ```sh
-   scripts/build-plugin.sh
-   scripts/install-plugin.sh
-   ```
-
-   This copies the bundle to `~/Library/Application Support/FileMaker/Extensions/`. It refuses
-   to run while FileMaker is running. It also clears quarantine and verifies the signature.
-3. Start FileMaker Pro.
-4. **Allow the plug-in.** FileMaker cannot verify an ad-hoc signature, so it shows a dialog.
-   Tick **Always load this plug-in**, then click **Load Plug-in**. The decision is stored under
-   Settings > Permitted. To undo it, select the entry and press Backspace.
-   - **Gatekeeper.** A bundle built on this Mac has no quarantine attribute, so Gatekeeper does
-     not run. If you copy the bundle from another Mac or from a zip, run this before step 3:
-     ```sh
-     xattr -dr com.apple.quarantine ~/Library/Application\ Support/FileMaker/Extensions/FlightRecorder.fmplugin
-     ```
-5. Open **FileMaker Pro > Settings > Plug-Ins**. Check that **FlightRecorder** is listed and
-   ticked.
-6. Open any file. In the Data Viewer (or a calculation), evaluate:
-
-   ```
-   FlightRecorder_Version            → 0.1.0
-   FlightRecorder_Status             → {"running":true,"heartbeats":…,"log":"…/flight-YYYY-MM-DD.jsonl",…}
-   FlightRecorder_SimulateFreeze ( 1500 )   → blocks FileMaker for 1.5 s on purpose
-   ```
-
-7. Watch the log, or open the viewer:
-
-   ```sh
-   tail -f ~/Library/Logs/FlightRecorder/flight-*.jsonl
-   python3 scripts/summary.py
-   ```
-
-   You should see a `freeze` of about 1500 ms with your layout.
-
-The recorder **starts on its own** when FileMaker launches, with the default options.
-- To turn that off: `launchctl setenv FLIGHT_RECORDER_NO_AUTOSTART 1`, then restart FileMaker.
-- To uninstall: quit FileMaker and delete the `.fmplugin` from the Extensions folder.
 
 ### One-command load test (self-test mode)
 
@@ -222,18 +183,18 @@ If FileMaker does not list the plug-in, check:
 - for duplicates in `~/Library/Application Support/FileMaker/FileMaker Pro/26.0/Extensions/`
 - `Get ( InstalledFMPlugIns )`
 
-### Functions
+## Functions
 
 | Function | Result |
 |---|---|
 | `FlightRecorder_Version` | Plug-in version |
-| `FlightRecorder_Start ( { options } )` | (Re)starts recording; returns the log path. Options: `threshold=250; port=5003; sample_ms=2; context_ms=250; scripts=0; dir=/path; endpoint=http://host:8787; token=…; client=name`. `port=0` turns off the round-trip counter. Use `port=443` if HTTPS tunnelling is on. `endpoint` and `token` send the events to the companion server ([ingest-api.md](ingest-api.md)); `endpoint` needs `token` and must be `http://`. `client` overrides the client name (default: the macOS computer name). Unknown keys and bad values are listed on a second line of the result, `ignored: foo, port=abc`. A bad `endpoint` or a missing `token` returns `error: …` and leaves the recorder as it was. |
+| `FlightRecorder_Start ( { options } )` | (Re)starts recording; returns the log path. The options and their defaults are in [README.md](../README.md#options-of-flightrecorder_start). Unknown keys and bad values are listed on a second line of the result, `ignored: foo, port=abc`. A bad `endpoint` or a missing `token` returns `error: …` and leaves the recorder as it was. |
 | `FlightRecorder_Stop` | Stops recording; returns `stopped: N freezes, …` |
 | `FlightRecorder_Mark ( label )` | Writes a mark with the calling script's context. Marks within 1 s before a freeze are attached to it. A Mark is not a heartbeat. |
-| `FlightRecorder_Status` | JSON: running, heartbeats, freezes, current freeze length, last context, log path, endpoint, client (never the token), `session_id`, `last_seq`. Errors: `write_errors` and `last_write_error` (failed log or install-id writes), `events_lost` (writer could not keep up). Sending (0 or empty without an endpoint): `queued`, `sent`, `dropped`, `spooled`, `duplicates`, `send_failures`, `last_send`, `auth_failed`, `pings`, `last_ping`, `last_send_error`. Use `JSONGetElement ( FlightRecorder_Status ; "last_send_error" )`. |
+| `FlightRecorder_Status` | JSON: running, heartbeats, idle_messages, freezes, threshold_ms, current freeze length (`in_freeze_ms`), last context, log path, endpoint, client (never the token), `session_id`, `last_seq`. Errors: `write_errors` and `last_write_error` (failed log or install-id writes), `events_lost` (writer could not keep up). Sending (0 or empty without an endpoint): `queued`, `sent`, `dropped`, `spooled`, `duplicates`, `send_failures`, `last_send`, `auth_failed`, `pings`, `last_ping`, `last_send_error`. Use `JSONGetElement ( FlightRecorder_Status ; "last_send_error" )`. |
 | `FlightRecorder_SimulateFreeze ( ms )` | Blocks the main thread for up to 10 000 ms. For testing only. |
 
-### Log format (`~/Library/Logs/FlightRecorder/flight-YYYY-MM-DD.jsonl`, schema `v: 1`)
+## Log format (`~/Library/Logs/FlightRecorder/flight-YYYY-MM-DD.jsonl`, schema `v: 1`)
 
 The file date is the local date of the Mac, so a new file starts at local midnight. All `ts` and `end_ts` values are UTC.
 
@@ -253,7 +214,8 @@ Every line has:
 - `seq`: 1, 2, 3, … in the session, in the order the lines are written. (`session_id`, `seq`) is
   the id of the event; the server uses it to drop duplicates.
 
-Lines written before the ingest API have no `session_id` and no `seq`.
+A reader also accepts a line without `session_id` and `seq`: `session_id` is then empty and
+`seq` is 0.
 
 Other types:
 
@@ -353,5 +315,6 @@ Scripts:
 - **macOS only.** On Windows the same design would use `GetPerTcpConnectionEStats` and a
   message-loop hook.
 - **The plug-in ID `SCFR` is not registered with Claris.**
-- **No main-thread stack sampling yet.** It would show *what* FileMaker was doing (drawing or
+- **Plain HTTP only.** On the LAN, other computers can read the token and the events.
+- **No main-thread stack sampling.** It would show *what* FileMaker was doing (drawing or
   calculating).

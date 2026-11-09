@@ -17,7 +17,8 @@ This plug-in is a prototype.
 - The plug-in loads in FileMaker Pro 26.0.3 on macOS.
 - The plug-in records freezes in FileMaker Pro 26.0.3 on macOS.
 - We did not test the plug-in with a file on FileMaker Server.
-- The plug-in can send events to a companion server. The server is not in this repository yet.
+- The plug-in can send events to a companion server.
+- Not built yet: the companion server and its dashboard. See issues [#21](https://github.com/solutionscay/fm-flight-recorder/issues/21), [#22](https://github.com/solutionscay/fm-flight-recorder/issues/22) and [#23](https://github.com/solutionscay/fm-flight-recorder/issues/23).
 
 ## What you need
 

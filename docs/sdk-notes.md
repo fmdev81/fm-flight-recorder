@@ -1,19 +1,19 @@
-# FileMaker plug-in SDK notes (for the Flight Recorder prototype)
+# FileMaker plug-in SDK notes
 
-Written 2026-11-08 on an arm64 Mac with FileMaker Pro 26.0.3 installed. "Checked here" means
-I checked it on this Mac (files, headers, binaries), not by running FileMaker. "Unconfirmed"
-means no source says so and it needs the test plan in [design.md](design.md#test-plan-for-the-three-feasibility-questions).
-Later, the plug-in loaded and recorded freezes in FileMaker Pro 26.0.3 on macOS (see the
-Status section in [README.md](../README.md#status)). These notes do not mark items as
-confirmed from that run.
+These notes are about the Claris FileMaker Plug-in SDK 26.0.3 and FileMaker Pro 26.0.3 on macOS.
 
-## 1. Where the SDK comes from, and what is on this Mac
+- "Checked here" means that we checked it in the files, headers and binaries, not in FileMaker.
+- "Confirmed in FileMaker" means that the plug-in did it in FileMaker Pro 26.0.3 on macOS.
+- "Unconfirmed" means that no source says so. The test plan in
+  [design.md](design.md#test-plan-for-the-three-feasibility-questions) checks it.
+
+## 1. Where the SDK comes from
 
 - **Download.** The Claris downloads page links "Plug-in SDK for Windows, Mac, Linux, and
   iOS": `https://downloads.claris.com/DEVREL/sdk/fm_plugin_sdk_26.0.3.307.zip`
   (https://www.claris.com/resources/downloads/).
-  - **Checked here:** it downloads with **no login**: HTTP 200, 4,230,493 bytes,
-    sha256 `f9bf7eb31b7fe0c063eab43a6e5ca4c709b91315bf1b76cdfde50342ea0b9d62`.
+  - **Checked here:** it downloads with **no login**. sha256
+    `f9bf7eb31b7fe0c063eab43a6e5ca4c709b91315bf1b76cdfde50342ea0b9d62`.
 - **Contents of the zip** (`PlugInSDK/`):
   - `Headers/FMWrapper/*.h`: FMXExtern, FMXCalcEngine, FMXText, FMXData, FMXTypes,
     FMXBinaryData, FMXDateTime, FMXFixPt, FMXTextStyle, FMXClient, FMWrapper.
@@ -21,11 +21,10 @@ confirmed from that run.
   - `MiniExample/`: a C++ sample with an Xcode project, CMake and a Visual Studio solution.
   - `README.txt`: sample build environments, links on signing, script step XML.
 - **License.** The header grants a limited license "solely to enable licensees of Claris
-  FileMaker Pro to compile plug-ins". So the SDK is **not committed** here. It sits in `sdk/`
-  (gitignored), and [design.md](design.md#build) says how to fetch it.
+  FileMaker Pro to compile plug-ins". So the SDK is **not committed** here. It goes in `sdk/`
+  (gitignored). [README.md](../README.md#get-the-claris-sdk) tells how to get it.
   (https://docs.rs/crate/fm_plugin/0.1.17/source/headers/FMXExtern.h)
-- **Before the download, no SDK headers were on this Mac** (checked here: `find /` for
-  `FMXExtern.h`). But FileMaker Pro.app ships
+- **FileMaker Pro.app has no SDK headers**, but it has
   `Contents/Frameworks/FMWrapper.framework`, universal x86_64 + arm64, version 26.0.3.307.
   - It exports the whole C API, about 250 `FM_*` symbols such as `FM_ExprEnv_Evaluate`,
     `FM_ExprEnv_EvaluateGetFunction`, `FM_ExprEnv_ExecuteFileSQL`,
@@ -39,7 +38,7 @@ confirmed from that run.
   - the `unsafeCalls` comment now reads **"True if not on the main thread"**
   - `cfmCalls` is renamed `unusedFlag`
   - `scripts/check-abi.sh` static_asserts our Rust mirror against the SDK headers for
-    arm64 and x86_64. It passes.
+    arm64 and x86_64.
 
 ## 2. Building and loading on macOS
 
@@ -58,8 +57,8 @@ confirmed from that run.
     checks the export with `nm`.
 - **Install location** (https://help.claris.com/en/pro-help/content/installing-plug-ins.html):
   - `~/Library/Application Support/FileMaker/Extensions/` for all versions, or
-  - `~/Library/Application Support/FileMaker/FileMaker Pro/<ver>/Extensions/`. On this Mac
-    `<ver>` is `26.0` (checked here: the folder exists, with no Extensions subfolder yet).
+  - `~/Library/Application Support/FileMaker/FileMaker Pro/<ver>/Extensions/`. For
+    FileMaker Pro 26.0.3, `<ver>` is `26.0`.
   - Duplicates in several folders can make an old copy load
     (https://www.mbsplugins.de/archive/2022-04-13/Why_MBS_Plugin_fails_to_load).
   - Enable it under FileMaker Pro > Settings > Plug-Ins
@@ -74,6 +73,8 @@ confirmed from that run.
     (https://raw.githubusercontent.com/GoyaPtyLtd/BaseElements-Plugin/main/BUILDING.md).
   - **Checked here:** FileMaker Pro.app has the `com.apple.security.cs.disable-library-validation`
     entitlement, so the hardened runtime lets it load our ad-hoc-signed library.
+  - **Confirmed in FileMaker:** the ad-hoc-signed plug-in loads after "Always load this
+    plug-in" and Load Plug-in.
   - A bundle built on this Mac has no `com.apple.quarantine` attribute, so Gatekeeper is not
     involved. A copy downloaded or unzipped from elsewhere needs
     `xattr -dr com.apple.quarantine`.
@@ -136,8 +137,8 @@ Messages (`whichCall`) and their parameters:
 
 We send `SCFR1nnYYnn`. Plug-in ids must be unique low-ASCII alphanumerics and **must not start
 with "F", "FM" or "Web"** (https://homeappliance.manualsonline.com/manuals/mfg/filemaker/8.html?p=49).
-Our first choice, `FLRC`, broke that rule, so the prototype uses `SCFR`. It is not registered
-with Claris.
+We use `SCFR`. It is not registered with Claris
+([#50](https://github.com/solutionscay/fm-flight-recorder/issues/50)).
 
 **Idle levels** (`parm1` of `kFMXT_Idle`):
 
@@ -205,8 +206,8 @@ FM_ExprEnv_RegisterExternalFunctionEx(const QuadChar& id, short funcId, const Te
 **Rust:** the `fm_plugin` crate, https://github.com/mutantcows/rust_fm_plugin.
 - MIT; last release 0.1.17 on 2021-04-03; tested on FM 18/19; effectively unmaintained.
 - It vendors the FM19 headers and libraries, `bindgen` output, and a `register_plugin!` macro.
-- We did **not** depend on it. It is old, pulls a large vendored SDK, and we needed only 20
-  functions. We used its source and headers as a cross-check (`docs.rs/crate/fm_plugin`).
+- We did **not** depend on it. It is old, pulls a large vendored SDK, and we need only a
+  small part of the API. We used its source and headers as a cross-check (`docs.rs/crate/fm_plugin`).
 - No other Rust bindings found.
 
 **C++ starting points:**
@@ -262,7 +263,7 @@ public product named "FM Perflyzer" or "fmPerception" was found.
     window, or Allow User Abort on) is *not* a frozen UI, so it is not logged as a freeze.
     Long "script running" periods are logged as `script_busy` instead.
   - We do not sample the main thread's stack. That would need Mach `thread_get_state` and
-    symbolication; possible later.
+    symbolication.
 
 ### (b) Can a freeze be tied to layout, script and user without slowing FileMaker?
 
