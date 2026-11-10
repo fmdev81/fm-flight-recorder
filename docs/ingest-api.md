@@ -241,7 +241,8 @@ These calls are for the dashboard and for scripts. They need no token.
 
 | Method and path | Use |
 |---|---|
-| `GET /api/v1/status` | Listen address, clients and connected clients, last event, server time zone and its UTC offset, versions |
+| `GET /api/v1/status` | Listen address, clients and connected clients, last event, server time zone and its UTC offset, versions, open live streams (`live_streams`) |
+| `GET /api/v1/live` | Server-Sent Events for open pages: `hello` when the stream opens, `events` (data: the number of new events) after each stored batch, `client` when a client connects or goes offline. The stream has no event data. A comment line goes out each 15 s. 64 streams at most, then `503`. |
 | `GET /api/v1/token` | The Event token |
 | `POST /api/v1/token` | Make a new Event token. The old token gets `401` from then on. |
 | `GET /api/v1/flags?range=&file=` | The flagged layouts, clients and plug-in versions |

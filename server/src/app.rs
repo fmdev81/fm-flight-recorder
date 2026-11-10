@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::db::{self, Db, Settings};
+use crate::live::{Kind, Live};
 use crate::tz::{now_ms, Zone};
 use crate::{api, logln, rollup, web};
 use axum::Router;
@@ -21,6 +22,8 @@ pub struct App {
     pub started_ms: i64,
     /// The address the server listens on, once it is bound.
     pub bound: OnceLock<SocketAddr>,
+    /// Tells open dashboard pages about new data (`GET /api/v1/live`).
+    pub live: Live,
 }
 
 pub type Shared = Arc<App>;
@@ -37,6 +40,7 @@ impl App {
             token: RwLock::new(token),
             started_ms: now_ms(),
             bound: OnceLock::new(),
+            live: Live::new(),
         })
     }
 
@@ -144,6 +148,8 @@ pub fn spawn_jobs(app: Shared) {
                     *a.token.write().unwrap() = t;
                 }
                 let closed = rollup::close_offline_sessions(&db, now, a.connected_ms())?;
+                // A client went offline: the Clients page and the footer change.
+                a.live.notify(Kind::Client, closed as u64);
                 let mut out = format!("closed {closed} sessions");
                 if hourly {
                     let rep = rollup::run(&mut db, a.zone, &s, now)?;
@@ -181,6 +187,13 @@ pub async fn serve(
         app.zone.name()
     );
     spawn_jobs(app.clone());
+    // End the live streams first, or the graceful shutdown waits for every
+    // open page.
+    let a = app.clone();
+    let stop = async move {
+        stop.await;
+        a.live.close();
+    };
     axum::serve(
         listener,
         router(app).into_make_service_with_connect_info::<SocketAddr>(),

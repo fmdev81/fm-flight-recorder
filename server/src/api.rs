@@ -1,6 +1,7 @@
 //! The JSON API: ingest (docs/ingest-api.md), health, token, status.
 
 use crate::app::{with_db, Shared, VERSION};
+use crate::live::{self, Kind};
 use crate::store::{self, Meta, StoreError};
 use crate::tz::now_ms;
 use crate::views::{self, Ctx, Params};
@@ -22,6 +23,7 @@ pub fn routes() -> Router<Shared> {
         .route(PATH_PING, post(ping))
         .route("/api/v1/token", get(token_show).post(token_new))
         .route("/api/v1/status", get(status))
+        .route("/api/v1/live", get(live::stream))
         .route("/api/v1/flags", get(flags_json))
         .route("/api/v1/freezes", get(freezes_json))
         // The ingest routes read the body themselves, with the API limit.
@@ -129,7 +131,10 @@ async fn events(
     })
     .await;
     match r {
-        Ok(reply) => Json(reply).into_response(),
+        Ok(reply) => {
+            app.live.notify(Kind::Events, reply.accepted);
+            Json(reply).into_response()
+        }
         Err(e) => store_err(e),
     }
 }
@@ -152,8 +157,21 @@ async fn ping(
         Err(e) => return store_err(e),
     };
     let ip = peer.ip().to_string();
-    match with_db(&app, move |_, db| store::store_ping(db, &p, &ip, now_ms())).await {
-        Ok(()) => Json(json!({})).into_response(),
+    let r = with_db(&app, move |a, db| {
+        let now = now_ms();
+        // A ping from a client that was offline (or new) changes its status.
+        let back = store::client_last_seen(db, &p.client)
+            .is_none_or(|seen| now - seen > a.connected_ms());
+        store::store_ping(db, &p, &ip, now).map(|()| back)
+    })
+    .await;
+    match r {
+        Ok(back) => {
+            if back {
+                app.live.notify(Kind::Client, 1);
+            }
+            Json(json!({})).into_response()
+        }
         Err(e) => store_err(e),
     }
 }
@@ -177,7 +195,9 @@ async fn token_new(State(app): State<Shared>, h: HeaderMap) -> Response {
 
 async fn status(State(app): State<Shared>) -> Json<serde_json::Value> {
     let f = with_db(&app, |a, db| crate::query::footer(a, db, now_ms())).await;
-    Json(serde_json::to_value(f).unwrap())
+    let mut v = serde_json::to_value(f).unwrap();
+    v["live_streams"] = json!(app.live.streams());
+    Json(v)
 }
 
 /// `GET /api/v1/flags?range=&file=`: the flagged layouts, clients, versions.

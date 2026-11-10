@@ -19,6 +19,7 @@ axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
 clap = { version = "4", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false }
 iana-time-zone = "0.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

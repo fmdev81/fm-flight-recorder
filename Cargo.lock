@@ -351,6 +351,7 @@ dependencies = [
  "chrono-tz",
  "clap",
  "fm_flight_recorder",
+ "futures-util",
  "iana-time-zone",
  "rusqlite",
  "serde",
