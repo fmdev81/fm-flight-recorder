@@ -1,4 +1,6 @@
-# FileMaker Flight Recorder
+<p align="center"><img src="docs/images/banner.png" alt="FM-Flight-Recorder: records each FileMaker Pro freeze, by client, and splits it into server wait and client time" width="100%"></p>
+
+# FM-Flight-Recorder
 
 FlightRecorder is a plug-in for FileMaker Pro on macOS.
 It records each freeze of the FileMaker Pro client that is 250 ms or longer.
