@@ -40,6 +40,11 @@ pub struct Params {
     pub shown: u64,
     /// `lanes=all`: every client lane, no cap.
     pub all_lanes: bool,
+    /// The lanes zoom: `zoom=15m|1h|4h` or `span=LO-HI` (minutes of the day).
+    pub zoom: String,
+    pub span: String,
+    /// All the query parameters, sorted by name.
+    pub raw: Vec<(String, String)>,
 }
 
 impl Params {
@@ -62,7 +67,29 @@ impl Params {
             show: g("show") == "1",
             shown: g("shown").parse().unwrap_or(0),
             all_lanes: g("lanes") == "all",
+            zoom: g("zoom"),
+            span: g("span"),
+            raw: {
+                let mut v: Vec<(String, String)> =
+                    m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                v.sort();
+                v
+            },
         }
+    }
+
+    pub fn lanes_zoom(&self) -> lanes::Zoom {
+        lanes::Zoom::parse(&self.zoom, &self.span)
+    }
+
+    /// The query string without the zoom parameters (for the zoom links).
+    pub fn qs_without_zoom(&self) -> String {
+        self.raw
+            .iter()
+            .filter(|(k, _)| k != "zoom" && k != "span")
+            .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+            .collect::<Vec<_>>()
+            .join("&")
     }
 
     pub fn range(&self, z: Zone, now: i64) -> Range {
@@ -391,6 +418,14 @@ pub struct FRow {
     pub cli_w: String,
     pub split_title: String,
     pub marks: String,
+    /// The time with the zone, for the tooltip.
+    #[serde(skip)]
+    pub t_tz: String,
+    /// "2 min ago" for a time of today, else empty.
+    #[serde(skip)]
+    pub ago: String,
+    #[serde(skip)]
+    pub iso: String,
     #[serde(skip)]
     pub ts_ms: i64,
     #[serde(skip)]
@@ -469,13 +504,14 @@ impl<'a> Ctx<'a> {
             .unwrap_or_default()
     }
 
-    /// "16:58:12" for today, "6 Nov 16:58:12" for an older time.
+    /// The one time format: "Today 16:58:12", "Nov 6, 16:58:12".
     pub fn when(&self, ms: i64) -> String {
-        if self.z.date_of(ms) == self.z.date_of(self.now) {
-            self.z.hms(ms)
-        } else {
-            self.z.fmt(ms, "%-d %b %H:%M:%S")
-        }
+        self.z.stamp(ms, self.now)
+    }
+
+    /// `when` with the zone, for tooltips: "Today 16:58:12 CST".
+    pub fn when_tz(&self, ms: i64) -> String {
+        self.z.stamp_tz(ms, self.now)
     }
 
     pub fn ctl(&self, path: &str, p: &Params, r: &Range) -> Ctl {
@@ -651,6 +687,13 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
                         String::new()
                     },
                     t: ctx.when(ts),
+                    t_tz: ctx.when_tz(ts),
+                    ago: if ctx.z.date_of(ts) == ctx.z.date_of(ctx.now) {
+                        crate::tz::ago(ts, ctx.now)
+                    } else {
+                        String::new()
+                    },
+                    iso: crate::tz::iso(ts),
                     layout_url: ctl.layout_url(&file, &layout),
                     script_url: if kind == "mark" && script.is_empty() {
                         String::new()
@@ -850,6 +893,12 @@ pub fn today_lanes(ctx: &Ctx, p: &Params) -> Lanes {
     if p.all_lanes {
         qs.push_str("&lanes=all");
     }
+    if !p.zoom.is_empty() {
+        qs.push_str(&format!("&zoom={}", enc(&p.zoom)));
+    }
+    if !p.span.is_empty() {
+        qs.push_str(&format!("&span={}", enc(&p.span)));
+    }
     lanes::build(
         ctx,
         lanes::Input {
@@ -863,6 +912,8 @@ pub fn today_lanes(ctx: &Ctx, p: &Params) -> Lanes {
             day_url: &|_| String::new(),
             all_url: format!("/freezes?range=today{}", lanes::file_qs(&file)),
             live_qs: Some(qs),
+            zoom: p.lanes_zoom(),
+            keep_qs: p.qs_without_zoom(),
         },
     )
 }
@@ -871,6 +922,7 @@ pub fn today_lanes(ctx: &Ctx, p: &Params) -> Lanes {
 /// (more than 31 days, or all days past the event retention).
 fn day_lanes(
     ctx: &Ctx,
+    p: &Params,
     r: &Range,
     f: &[Fact],
     sess: &[SessRow],
@@ -893,6 +945,8 @@ fn day_lanes(
             day_url,
             all_url,
             live_qs: None,
+            zoom: p.lanes_zoom(),
+            keep_qs: p.qs_without_zoom(),
         },
     ))
 }
@@ -912,6 +966,9 @@ fn none_text(r: &Range) -> &'static str {
     }
 }
 
+/// Rows of "Latest freezes" on the overview.
+pub const OVERVIEW_ROWS: usize = 15;
+
 pub struct Overview {
     pub ctl: Ctl,
     pub tiles: Vec<Tile>,
@@ -919,9 +976,9 @@ pub struct Overview {
     pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
-    pub layouts: Vec<NRow>,
-    pub scripts: Vec<NRow>,
     pub recent: Vec<FRow>,
+    /// Freezes in the range, for "15 of 120".
+    pub recent_total: String,
 }
 
 pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
@@ -1006,6 +1063,7 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
         let fq = lanes::file_qs(&file);
         day_lanes(
             ctx,
+            p,
             &r,
             &f,
             &sess,
@@ -1013,16 +1071,16 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
             ctl.freezes_url(""),
         )
     };
-    let layouts = group(&fz, |x| (x.file.clone(), x.layout.clone()));
-    let scripts = group(&fz, |x| (x.file.clone(), x.script.clone()));
-    let (recent, _) = freeze_rows(
+    // The newest freezes first: the main panel of the overview. The worst
+    // layouts and scripts are on the Layouts and Scripts pages.
+    let (recent, recent_total) = freeze_rows(
         ctx,
         &ctl,
         &FreezeQuery {
             start_ms: r.start_ms,
             end_ms: r.end_ms,
             filter: Filter::file(&file),
-            limit: 8,
+            limit: OVERVIEW_ROWS,
             ..Default::default()
         },
     );
@@ -1032,9 +1090,8 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
         lanes,
         chart_title: title.into(),
         chart: Chart::stack(&bars, 160),
-        layouts: nrows(&layouts, &ctl, "layout", 5, ctx),
-        scripts: nrows(&scripts, &ctl, "script", 5, ctx),
         recent,
+        recent_total: num(recent_total),
         ctl,
     }
 }
@@ -1172,7 +1229,7 @@ fn day_rows(f: &[Fact], r: &Range) -> Vec<DayRow> {
     day_aggs(f, r)
         .into_iter()
         .map(|(d, a)| DayRow {
-            day: d.format("%a %-d %b").to_string(),
+            day: d.format("%a, %b %-d").to_string(),
             n: num(a.n),
             total: dur(a.total),
             p50: dur(a.p50()),
@@ -1278,6 +1335,7 @@ pub fn layout_detail(ctx: &Ctx, p: &Params) -> LayoutDetail {
             let base = format!("/layout?file={}&name={}", enc(&p.file), enc(&p.name));
             day_lanes(
                 ctx,
+                p,
                 &r,
                 &f,
                 &[],
@@ -1633,6 +1691,7 @@ pub fn script_detail(ctx: &Ctx, p: &Params) -> ScriptDetail {
             let base = format!("/script?file={}&name={}", enc(&p.file), enc(&p.name));
             day_lanes(
                 ctx,
+                p,
                 &r,
                 &f,
                 &[],
@@ -1706,7 +1765,7 @@ pub fn users(ctx: &Ctx, p: &Params) -> Users {
     let mut ctl = ctx.ctl("/users", p, &week);
     ctl.show_range = false;
     ctl.range = "today".into();
-    ctl.date = ctx.z.fmt(ctx.now, "%a %-d %b %Y · %H:%M");
+    ctl.date = format!("{} {}", ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"), ctx.z.abbr(ctx.now));
     let file = p.file_opt();
     let f7 = ctx.facts(&week, &Filter::file(&file));
     let names = user_names(&f7);
@@ -2018,6 +2077,7 @@ pub fn user_detail(ctx: &Ctx, p: &Params) -> UserDetail {
             let base = format!("/user?account={}", enc(&p.account));
             day_lanes(
                 ctx,
+                p,
                 &r,
                 &f,
                 &[],
@@ -2080,7 +2140,7 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
     let mut ctl = ctx.ctl("/clients", p, &week);
     ctl.show_range = false;
     ctl.range = "today".into();
-    ctl.date = ctx.z.fmt(ctx.now, "%a %-d %b %Y · %H:%M");
+    ctl.date = format!("{} {}", ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"), ctx.z.abbr(ctx.now));
     let file = p.file_opt();
     let f7 = ctx.facts(&week, &Filter::file(&file));
     let g7: HashMap<i64, Group> = group(&f7, |x| (String::new(), x.client_id.to_string()))
@@ -2366,7 +2426,7 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
         .iter()
         .take(20)
         .map(|s| SessView {
-            day: ctx.z.fmt(s.start, "%a %-d %b"),
+            day: ctx.z.fmt(s.start, "%a, %b %-d"),
             start: ctx.z.hms(s.start),
             stop: if s.open {
                 String::new()
@@ -2453,7 +2513,7 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
         tiles,
         sessions,
         options_when: latest
-            .map(|s| ctx.z.fmt(s.start, "%a %-d %b %H:%M:%S"))
+            .map(|s| ctx.when_tz(s.start))
             .unwrap_or_default(),
         options,
         users: nrows(&users, &ctl, "user", 8, ctx),
@@ -2461,6 +2521,7 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
         srtt,
         lanes: day_lanes(
             ctx,
+            p,
             &r,
             &f,
             &range_sess,
@@ -3098,8 +3159,8 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
         },
         when: format!(
             "{} – {}",
-            ctx.z.fmt(ts, "%a %-d %b %Y · ") + &ms(ts),
-            ms(end)
+            ctx.z.fmt(ts, "%a, %b %-d, %Y · ") + &ms(ts),
+            format!("{} {}", ms(end), ctx.z.abbr(end))
         ),
         client: ctx.client_name(cid),
         client_url: ctl.client_url(cid),
@@ -3228,7 +3289,7 @@ pub fn setup(ctx: &Ctx, p: &Params, saved: bool) -> Setup {
             num(ev_n as u64),
             fmt::bytes(ev_bytes as u64),
             ev_min
-                .map(|t| format!("since {}", ctx.z.fmt(t, "%-d %b %Y")))
+                .map(|t| format!("since {}", ctx.z.fmt(t, "%b %-d, %Y")))
                 .unwrap_or_else(|| "—".into())
         ),
         totals: format!(
@@ -3237,7 +3298,7 @@ pub fn setup(ctx: &Ctx, p: &Params, saved: bool) -> Setup {
             fmt::bytes(td_bytes as u64),
             td_min
                 .and_then(|d| d.parse::<NaiveDate>().ok())
-                .map(|d| format!("since {}", d.format("%-d %b %Y")))
+                .map(|d| format!("since {}", d.format("%b %-d, %Y")))
                 .unwrap_or_else(|| "—".into())
         ),
         files: {

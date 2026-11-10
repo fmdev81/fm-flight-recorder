@@ -64,7 +64,7 @@
 
 {% macro fth(show_file) %}<thead><tr><th>Time</th><th class="r">Duration</th><th style="width: 96px">Split</th><th>Layout</th><th>From</th><th>Account</th><th>Client</th><th>Script</th>{% if show_file %}<th>File</th>{% endif %}<th class="r">Round trips</th><th class="r">Server</th></tr></thead>{% endmacro %}
 
-{% macro ftr(r, show_file) %}<tr class="fr"><td class="mono c-t"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td>
+{% macro ftr(r, show_file) %}<tr class="fr" data-id="{{ r.id }}"><td class="mono c-t"><a class="lite" href="{{ r.url }}" title="{{ r.t_tz }}"><time datetime="{{ r.iso }}">{{ r.t }}</time></a>{% if !r.ago.is_empty() %} <span class="ago" data-ago="{{ r.iso }}">{{ r.ago }}</span>{% endif %}</td>
 <td class="r mono c-d">{{ r.dur }}</td>
 <td class="c-s"><div class="hb" role="img" aria-label="{{ r.split_title }}" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
 <td class="c-l"><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
