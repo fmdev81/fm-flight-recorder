@@ -129,12 +129,19 @@ input.fsel{padding-right:8px;background-image:none}
 .muted{color:var(--muted)}
 .grid{display:grid;gap:16px}
 .lv{display:contents}
-.g-tiles{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
-.g-tiles4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.g-tiles{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.g-tiles4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
 .g-2{grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))}
 .g-3{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
 .g-2in{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));align-content:start}
-.tile{display:flex;flex-direction:column;gap:6px}
+/* Stat tiles: compact, so more of the page shows above the fold. */
+.card.tile{padding:8px 14px 9px;gap:1px}
+.tile{display:flex;flex-direction:column;gap:2px}
+.tile .big{font-size:20px;line-height:24px}
+.tile .big .small{font-size:13px}
+.tile .sub{font-size:12px;line-height:16px}
+.tile .hb{margin:3px 0 2px;height:6px}
+.tile .vlist{font-size:12px;line-height:16px;gap:1px;margin-top:2px}
 .tile .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .vlist{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--ink2);font-family:var(--mono)}
 .vlist span{display:flex;justify-content:space-between;gap:12px}
@@ -309,7 +316,9 @@ table.t{width:100%;border-collapse:collapse;font-size:13px;line-height:18px}
 
 /* Phone overrides that must come last. */
 @media (max-width:559px){
-  .g-tiles,.g-tiles4{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .g-tiles,.g-tiles4{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .card.tile{padding:8px 10px}
+  .tile .big{font-size:18px;line-height:22px}
   .grid{gap:12px}
   .card{padding:14px}
   .lanes{padding:14px}
