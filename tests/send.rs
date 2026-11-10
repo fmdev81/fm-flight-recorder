@@ -123,6 +123,44 @@ fn a_small_batch_waits_for_the_interval() {
 }
 
 #[test]
+fn send_ms_option_sets_the_batch_interval() {
+    let srv = Receiver::start(0);
+    let dir = tmp("send-ms");
+    let mut c = Config {
+        log_dir: dir.clone(),
+        state_dir: dir.join("state"),
+        net_port: None,
+        app: "test".into(),
+        send_batch_max: 100,
+        ..Default::default()
+    };
+    let r = c.apply_options(&format!(
+        "endpoint={}; token={TOKEN}; send_ms=250; ping_ms=5000",
+        srv.endpoint()
+    ));
+    assert!(r.errors.is_empty() && r.ignored.is_empty(), "{r:?}");
+    let rec = Recorder::start(c, Box::new(fm_flight_recorder::net::NoProbe));
+    let st = rec.status();
+    assert_eq!((st.send_ms, st.ping_ms), (250, 5000));
+    // session_start goes out alone, about 250 ms after the start.
+    assert!(srv.state.wait_for(Duration::from_secs(3), |s| s.seqs() == [1]));
+    // A new event arrives 250 ms (plus the post) after it was written,
+    // not 5 s (the default).
+    let t0 = Instant::now();
+    rec.mark("live", Context::default());
+    assert!(srv
+        .state
+        .wait_for(Duration::from_secs(3), |s| s.seqs() == [1, 2]));
+    let took = t0.elapsed();
+    assert!(
+        took >= Duration::from_millis(200) && took < Duration::from_millis(1500),
+        "{took:?}"
+    );
+    rec.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn queue_is_bounded_when_the_server_is_down() {
     let dir = tmp("bounded");
     let mut c = cfg(&dir, &format!("http://127.0.0.1:{}", closed_port()));

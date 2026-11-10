@@ -124,6 +124,14 @@ pub struct Config {
 
 /// Events waiting for the writer thread. Full = lost and counted.
 pub const EVENT_QUEUE_MAX: usize = 4096;
+/// Range of `send_ms=` (FlightRecorder_Start). Below 250 ms a burst of
+/// freezes would make one post per freeze with no gain; the threshold is
+/// 250 ms by default, so freezes cannot come faster than that anyway.
+pub const SEND_MS_MIN: u64 = 250;
+pub const SEND_MS_MAX: u64 = 60_000;
+/// Range of `ping_ms=`.
+pub const PING_MS_MIN: u64 = 5_000;
+pub const PING_MS_MAX: u64 = 600_000;
 /// The longest that stop waits for the sender thread before it detaches it.
 pub const SENDER_STOP_WAIT: Duration = Duration::from_millis(20);
 
@@ -276,7 +284,7 @@ impl OptionReport {
 }
 
 impl Config {
-    /// Parse "threshold=250;port=5003;scripts=1;dir=/path;endpoint=http://h:8787;token=…"
+    /// Parse "threshold=250;port=5003;scripts=1;dir=/path;endpoint=http://h:8787;token=…;send_ms=250;ping_ms=15000"
     /// (FlightRecorder_Start option text). `port=0` disables the round-trip
     /// counter. Unknown keys and bad values are reported, not applied.
     pub fn apply_options(&mut self, text: &str) -> OptionReport {
@@ -306,6 +314,14 @@ impl Config {
                 "context_ms" => v
                     .parse::<u64>()
                     .map(|n| self.context_interval_ms = n.clamp(0, 60_000))
+                    .is_ok(),
+                "send_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.send_interval_ms = n.clamp(SEND_MS_MIN, SEND_MS_MAX))
+                    .is_ok(),
+                "ping_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.send_ping_ms = n.clamp(PING_MS_MIN, PING_MS_MAX))
                     .is_ok(),
                 "scripts" => {
                     self.context_during_scripts = matches!(v, "1" | "true" | "yes");
@@ -414,6 +430,9 @@ pub struct Status {
     pub freezes: u64,
     pub threshold_ms: u64,
     pub in_freeze_ms: u64,
+    /// `send_ms` and `ping_ms` in use (they matter only with an endpoint).
+    pub send_ms: u64,
+    pub ping_ms: u64,
     pub log: String,
     /// The companion server, empty if not set. The token is never shown.
     pub endpoint: String,
@@ -749,6 +768,8 @@ impl Recorder {
             } else {
                 (mono_ns() - since) / 1_000_000
             },
+            send_ms: self.cfg.send_interval_ms,
+            ping_ms: self.cfg.send_ping_ms,
             log: self.log_path().display().to_string(),
             endpoint: self
                 .cfg
@@ -1075,6 +1096,24 @@ mod tests {
         assert_eq!(c.threshold_ms, 20);
         c.apply_options("port=15003");
         assert_eq!(c.net_port, Some(15003));
+    }
+
+    #[test]
+    fn options_send_ms_and_ping_ms() {
+        let mut c = Config::default();
+        assert_eq!((c.send_interval_ms, c.send_ping_ms), (5000, 60_000));
+        let r = c.apply_options("send_ms=500; ping_ms=15000");
+        assert!(r.ignored.is_empty() && r.errors.is_empty(), "{r:?}");
+        assert_eq!((c.send_interval_ms, c.send_ping_ms), (500, 15_000));
+        // Clamped to the safe range.
+        c.apply_options("send_ms=0; ping_ms=1");
+        assert_eq!((c.send_interval_ms, c.send_ping_ms), (SEND_MS_MIN, PING_MS_MIN));
+        c.apply_options("SEND_MS=999999; ping_ms=99999999");
+        assert_eq!((c.send_interval_ms, c.send_ping_ms), (SEND_MS_MAX, PING_MS_MAX));
+        // A bad value is reported and the old value stays.
+        let r = c.apply_options("send_ms=fast");
+        assert_eq!(r.ignored, vec!["send_ms=fast".to_string()]);
+        assert_eq!(c.send_interval_ms, SEND_MS_MAX);
     }
 
     #[test]
