@@ -44,6 +44,11 @@ pub struct SettingDefaults {
     pub flag_plugin_min: String,
     pub rec_threshold_ms: u64,
     pub rec_port: u16,
+    /// `send_ms=` and `ping_ms=` in the startup script step. The defaults
+    /// are the live values: a freeze is on the dashboard about 1 s after it
+    /// ends. The plug-in's own defaults (5000, 60000) are for no option.
+    pub rec_send_ms: u64,
+    pub rec_ping_ms: u64,
 }
 
 impl Default for SettingDefaults {
@@ -56,6 +61,8 @@ impl Default for SettingDefaults {
             flag_plugin_min: "0.1.0".into(),
             rec_threshold_ms: 250,
             rec_port: 5003,
+            rec_send_ms: 250,
+            rec_ping_ms: 15_000,
         }
     }
 }
@@ -78,6 +85,8 @@ pub struct FileConfig {
     pub flag_plugin_min: Option<String>,
     pub threshold_ms: Option<u64>,
     pub port: Option<u16>,
+    pub send_ms: Option<u64>,
+    pub ping_ms: Option<u64>,
 }
 
 /// Command-line values (all optional; see `main.rs`).
@@ -157,6 +166,8 @@ impl Config {
                 flag_plugin_min: fc.flag_plugin_min.unwrap_or(d.flag_plugin_min),
                 rec_threshold_ms: fc.threshold_ms.unwrap_or(d.rec_threshold_ms),
                 rec_port: fc.port.unwrap_or(d.rec_port),
+                rec_send_ms: fc.send_ms.unwrap_or(d.rec_send_ms).clamp(250, 60_000),
+                rec_ping_ms: fc.ping_ms.unwrap_or(d.rec_ping_ms).clamp(5_000, 600_000),
             },
         }
     }

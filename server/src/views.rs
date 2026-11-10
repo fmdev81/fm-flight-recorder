@@ -3169,9 +3169,22 @@ impl Setup {
     /// The calculation for the plug-in, on one line.
     pub fn start_calc(&self) -> String {
         format!(
-            "FlightRecorder_Start ( \"endpoint={}; token={}; threshold={}; port={}\" )",
-            self.url, self.token, self.s.rec_threshold_ms, self.s.rec_port
+            "FlightRecorder_Start ( \"endpoint={}; token={}; threshold={}; port={}; send_ms={}; ping_ms={}\" )",
+            self.url,
+            self.token,
+            self.s.rec_threshold_ms,
+            self.s.rec_port,
+            self.s.rec_send_ms,
+            self.s.rec_ping_ms
         )
+    }
+    pub fn ping_s(&self) -> String {
+        let s = self.s.rec_ping_ms as f64 / 1000.0;
+        if s.fract() == 0.0 {
+            format!("{s:.0}")
+        } else {
+            format!("{s}")
+        }
     }
     pub fn masked(&self) -> String {
         "•".repeat(self.token.len().min(32))
@@ -3271,6 +3284,13 @@ pub fn parse_setup(form: &HashMap<String, String>, old: &Settings) -> Result<Set
     s.flag_plugin_min = v;
     s.rec_threshold_ms = num_in("rec_threshold_ms", 20.0, 600_000.0)? as u64;
     s.rec_port = num_in("rec_port", 0.0, 65535.0)? as u16;
+    // Optional in the form (an older page has no such fields).
+    if !g("rec_send_ms").is_empty() {
+        s.rec_send_ms = num_in("rec_send_ms", 250.0, 60_000.0)? as u64;
+    }
+    if !g("rec_ping_s").is_empty() {
+        s.rec_ping_ms = (num_in("rec_ping_s", 5.0, 600.0)? * 1000.0).round() as u64;
+    }
     s.event_days = num_in("event_days", 1.0, 3650.0)? as u32;
     s.total_days = num_in("total_days", 1.0, 36500.0)? as u32;
     Ok(s)

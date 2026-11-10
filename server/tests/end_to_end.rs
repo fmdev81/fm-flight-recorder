@@ -362,7 +362,30 @@ fn setup_saves_the_settings_and_makes_a_new_token() {
         );
     }
     let page = text(&get(&base, "/setup").body);
-    assert!(page.contains("threshold=300; port=443"));
+    // A form without the send fields keeps the live defaults.
+    assert!(page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"), "{page}");
+    let form2 = format!("{form}&rec_send_ms=1000&rec_ping_s=30");
+    let r = request(
+        &base,
+        "POST",
+        "/setup",
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        form2.as_bytes(),
+    );
+    assert_eq!(r.status, 303);
+    let page = text(&get(&base, "/setup").body);
+    assert!(page.contains("port=443; send_ms=1000; ping_ms=30000"));
+    for bad in ["rec_send_ms=100", "rec_ping_s=1"] {
+        let f = format!("{form}&{bad}");
+        let r = request(
+            &base,
+            "POST",
+            "/setup",
+            &[("Content-Type", "application/x-www-form-urlencoded")],
+            f.as_bytes(),
+        );
+        assert_eq!(r.status, 400, "{bad}");
+    }
     let bad = request(
         &base,
         "POST",
