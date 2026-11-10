@@ -48,10 +48,10 @@
 <div class="card">
 <div class="ch"><h2 class="ct" id="fz-count">{{ v.shown }} of {{ v.total }} freezes</h2>{% call m::keys() %}</div>
 {% if v.rows.is_empty() %}<div class="empty">No freezes</div>{% else %}
-<div class="tw tall"><table class="t">
-<thead><tr><th>Time</th><th>File</th><th>Layout</th><th>From</th><th>Account</th><th>User</th><th>Client</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th style="width: 120px">Server / client</th><th class="r">Server</th></tr></thead>
+<div class="tw tall fade"><table class="t ft">
+{% call m::fth(v.ctl.file.is_empty()) %}
 <tbody id="fz-body">
-{% include "freeze_tr.html" %}
+{% for r in v.rows %}{% call m::ftr(r, v.ctl.file.is_empty()) %}{% endfor %}
 </tbody></table></div>
 <div class="more" id="fz-more">{% if !v.more_url.is_empty() %}<button type="button" class="btn" hx-get="{{ v.more_url }}" hx-target="#fz-body" hx-swap="beforeend">Load more</button>{% endif %}</div>
 {% endif %}

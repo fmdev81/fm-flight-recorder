@@ -31,6 +31,7 @@ pub fn routes() -> Router<Shared> {
         .route("/freeze", get(freeze))
         .route("/setup", get(setup).post(setup_save))
         .route("/setup/token", post(setup_token))
+        .route("/fragment/lanes", get(lanes_fragment))
         .route("/static/{*path}", get(asset))
 }
 
@@ -125,6 +126,12 @@ struct SetupT {
     shell: Shell,
     v: views::Setup,
     error: String,
+}
+
+#[derive(Template)]
+#[template(path = "lanes.html")]
+struct LanesT {
+    lz: crate::lanes::Lanes,
 }
 
 #[derive(Template)]
@@ -297,6 +304,16 @@ async fn freezes_more(State(app): State<Shared>, Query(q): Q) -> Response {
     .await
 }
 
+/// The live "Who froze, when" (htmx refreshes it every 30 s on Today).
+async fn lanes_fragment(State(app): State<Shared>, Query(q): Q) -> Response {
+    page(&app, q, |c, p| {
+        html(LanesT {
+            lz: views::today_lanes(c, p),
+        })
+    })
+    .await
+}
+
 async fn freeze(State(app): State<Shared>, Query(q): Q) -> Response {
     page(&app, q, |c, p| {
         let v = views::freeze_detail(c, p);
@@ -393,8 +410,55 @@ const LICENSES: &str = concat!(
     "htmx 2.0.4 (https://htmx.org)\n\n",
     include_str!("../static/vendor/htmx-LICENSE.txt"),
     "\n\nuPlot 1.6.31 (https://github.com/leeoniya/uPlot)\n\n",
-    include_str!("../static/vendor/uPlot-LICENSE.txt")
+    include_str!("../static/vendor/uPlot-LICENSE.txt"),
+    "\n\nIBM Plex Sans 1.1.0 and IBM Plex Mono 2.5.0 (https://github.com/IBM/plex),\n",
+    "unmodified woff2 subset files from the npm packages @ibm/plex-sans and @ibm/plex-mono\n\n",
+    include_str!("../static/vendor/IBM-Plex-OFL.txt")
 );
+
+/// The IBM Plex subsets (IBM's own split files, unmodified).
+const FONTS: [(&str, &[u8]); 10] = [
+    (
+        "IBMPlexSans-Regular-Latin1.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-Regular-Latin1.woff2"),
+    ),
+    (
+        "IBMPlexSans-Regular-Latin2.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-Regular-Latin2.woff2"),
+    ),
+    (
+        "IBMPlexSans-Regular-Pi.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-Regular-Pi.woff2"),
+    ),
+    (
+        "IBMPlexSans-Medium-Latin1.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-Medium-Latin1.woff2"),
+    ),
+    (
+        "IBMPlexSans-Medium-Latin2.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-Medium-Latin2.woff2"),
+    ),
+    (
+        "IBMPlexSans-SemiBold-Latin1.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-SemiBold-Latin1.woff2"),
+    ),
+    (
+        "IBMPlexSans-SemiBold-Latin2.woff2",
+        include_bytes!("../static/fonts/IBMPlexSans-SemiBold-Latin2.woff2"),
+    ),
+    (
+        "IBMPlexMono-Regular-Latin1.woff2",
+        include_bytes!("../static/fonts/IBMPlexMono-Regular-Latin1.woff2"),
+    ),
+    (
+        "IBMPlexMono-Medium-Latin1.woff2",
+        include_bytes!("../static/fonts/IBMPlexMono-Medium-Latin1.woff2"),
+    ),
+    (
+        "IBMPlexMono-Regular-Pi.woff2",
+        include_bytes!("../static/fonts/IBMPlexMono-Regular-Pi.woff2"),
+    ),
+];
 
 /// A short hash of the app files, for cache-busting links.
 pub fn asset_tag() -> &'static str {
@@ -414,6 +478,19 @@ pub fn asset_tag() -> &'static str {
 }
 
 async fn asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    if let Some(name) = path.strip_prefix("fonts/") {
+        return match FONTS.iter().find(|(n, _)| *n == name) {
+            Some((_, bytes)) => (
+                [
+                    (header::CONTENT_TYPE, "font/woff2"),
+                    (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+                ],
+                *bytes,
+            )
+                .into_response(),
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        };
+    }
     let (body, ty) = match path.as_str() {
         "app.css" => (APP_CSS, "text/css; charset=utf-8"),
         "app.js" => (APP_JS, "text/javascript; charset=utf-8"),

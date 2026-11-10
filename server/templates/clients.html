@@ -6,7 +6,7 @@
 {% include "controls.html" %}
 {% endblock %}
 {% block content %}
-<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
+<div class="grid g-tiles">
 {% for t in v.tiles %}
 <div class="card tile"><div class="lbl">{{ t.label }}</div>
 <div class="big">{% if !t.link.is_empty() %}<a href="{{ t.link }}">{{ t.big }}</a>{% else %}{{ t.big }}{% endif %}</div>
@@ -20,7 +20,7 @@
 <div class="card">
 <div class="ch"><h2 class="ct">Clients</h2>{% call m::keys() %}</div>
 {% if v.rows.is_empty() %}<div class="empty">No clients</div>{% else %}
-<div class="tw{% if v.rows.len() > 10 %} tall{% endif %}"><table class="t">
+<div class="tw fade{% if v.rows.len() > 10 %} tall{% endif %}"><table class="t">
 <thead>
 <tr><th class="grp" colspan="6"></th><th class="grp sep" colspan="4">Today</th><th class="grp sep" colspan="2">7 days</th><th class="grp sep"></th></tr>
 <tr><th>Client</th><th>Accounts</th><th>Status</th><th>Last seen</th><th>FileMaker</th><th>Plug-in</th>
@@ -38,26 +38,16 @@
 <td><span class="mono">{{ c.seen }}</span>{% if !c.quiet.is_empty() %} <span class="flag">{{ c.quiet }}</span>{% endif %}</td>
 <td>{{ c.app }}</td>
 <td>{% if c.old %}<span class="flag">{{ c.plugin }}</span>{% else %}{{ c.plugin }}{% endif %}</td>
-<td class="r sep" data-v="{{ c.n_v }}">{{ c.n }}</td>
-<td class="r" data-v="{{ c.total_v }}">{{ c.total }}</td>
+<td class="r sep mono" data-v="{{ c.n_v }}">{{ c.n }}</td>
+<td class="r mono" data-v="{{ c.total_v }}">{{ c.total }}</td>
 <td>{% call m::split(c.split) %}</td>
-<td class="r">{{ c.pct }}</td>
-<td class="r sep">{{ c.n7 }}</td><td class="r">{{ c.total7 }}</td>
+<td class="r mono">{{ c.pct }}</td>
+<td class="r sep mono">{{ c.n7 }}</td><td class="r mono">{{ c.total7 }}</td>
 <td class="sep">{% if c.worst_url.is_empty() %}<span class="muted">{{ c.worst }}</span>{% else %}<a href="{{ c.worst_url }}" class="lite">{{ c.worst }}</a>{% endif %}</td>
 </tr>
 {% endfor %}
 </tbody></table></div>{% endif %}
 </div>
 
-<div class="card">
-<div class="ch"><h2 class="ct">Sessions today</h2><span class="key"><span class="sw sw-n"></span>Session</span><span class="key"><span class="sw sw-c"></span>Freeze ≥ 2 s</span></div>
-<div class="strips">
-{% for c in v.rows %}
-<div class="strip"><a href="{{ c.url }}">{{ c.name }}</a>
-<div class="lane">{% for s in c.strip.spans %}<div class="s" title="{{ s.2 }}" style="left: {{ s.0 }}; width: {{ s.1 }}"></div>{% endfor %}{% for k in c.strip.ticks %}<div class="f" style="left: {{ k }}"></div>{% endfor %}</div>
-</div>
-{% endfor %}
-<div class="strip"><span class="nm"></span><div class="axis">{% for a in v.axis %}<span>{{ a }}</span>{% endfor %}</div></div>
-</div>
-</div>
+{% let lz = v.lanes %}{% include "lanes.html" %}
 {% endblock %}

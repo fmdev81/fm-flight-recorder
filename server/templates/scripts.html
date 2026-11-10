@@ -31,12 +31,12 @@
 <td><a href="{{ r.url }}">{{ r.name }}</a></td>
 <td class="muted">{{ r.file }}</td>
 <td>{% for g in r.tags %}<span class="tag">{{ g }}</span>{% endfor %}</td>
-<td class="r sep" data-v="{{ r.n_v }}">{{ r.n }}</td>
-<td class="r" data-v="{{ r.total_v }}">{{ r.total }}</td>
+<td class="r sep mono" data-v="{{ r.n_v }}">{{ r.n }}</td>
+<td class="r mono" data-v="{{ r.total_v }}">{{ r.total }}</td>
 <td>{% call m::split(r.split) %}</td>
-<td class="r">{{ r.p50 }}</td><td class="r">{{ r.p95 }}</td><td class="r">{{ r.pct }}</td>
-<td class="r sep">{{ r.runs }}</td><td class="r" data-v="{{ r.busy_v }}">{{ r.busy }}</td>
-<td class="r sep">{{ r.accounts }}</td>
+<td class="r mono">{{ r.p50 }}</td><td class="r mono">{{ r.p95 }}</td><td class="r mono">{{ r.pct }}</td>
+<td class="r sep mono">{{ r.runs }}</td><td class="r mono" data-v="{{ r.busy_v }}">{{ r.busy }}</td>
+<td class="r sep mono">{{ r.accounts }}</td>
 <td>{% if r.layout_url.is_empty() %}<span class="muted">{{ r.layout }}</span>{% else %}<a class="lite" href="{{ r.layout_url }}">{{ r.layout }}</a>{% endif %}</td>
 </tr>
 {% endfor %}

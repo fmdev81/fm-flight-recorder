@@ -1,0 +1,30 @@
+<figure class="card lanes{% if lz.compact %} compact{% endif %}{% if lz.strip %} strip{% endif %}" id="{{ lz.id }}" aria-labelledby="{{ lz.id }}-h" data-lanes data-now="{{ lz.now_ms }}" data-clock0="{{ lz.now_label }}" data-f0="{{ lz.now_f }}" data-win="{{ lz.win1 - lz.win0 }}"{% if !lz.live_url.is_empty() %} hx-get="{{ lz.live_url }}" hx-trigger="every 30s [document.visibilityState==='visible']" hx-swap="outerHTML"{% endif %}>
+<div class="ch"><h2 class="ct" id="{{ lz.id }}-h">{{ lz.title }}</h2><span class="key"><span class="sw sw-s"></span>Server wait</span><span class="key"><span class="sw sw-c"></span>Client time</span><span class="lnote">{% if lz.strip %}Positions to time scale; block width grows with duration{% else %}Block width grows with duration; not to time scale{% endif %}</span></div>
+<div class="lz">
+<div class="lzr lzax" aria-hidden="true"><span></span><div class="trk">{% for a in lz.axis %}<span class="tick{% if !a.wide %} nw{% endif %}{% if !a.narrow %} nn{% endif %}" style="left: {{ a.x }}">{{ a.label }}</span>{% endfor %}{% if lz.has_now() %}<span class="rec" style="left: {{ lz.now_x }}"><i class="{% if lz.rec %}on{% else %}sb{% endif %}"></i>{% if lz.rec %}REC{% else %}STANDBY{% endif %} <time data-clock>{{ lz.now_label }}</time></span>{% endif %}</div><span></span></div>
+{% if lz.has_now() %}<div class="ph" style="--f: {{ lz.now_f }}" aria-hidden="true"></div>{% endif %}
+{% for l in lz.lanes %}
+<div class="lzr ln" role="group" aria-label="{{ l.label }}">
+<a class="lnl" href="{{ l.url }}" title="{{ l.label }}">{{ l.label }}</a>
+<div class="trk">
+<div class="base"></div>
+{% for s in l.sess %}<div class="ss" title="{{ s.title }}" style="left: {{ s.x }}; width: {{ s.w }}"></div>{% endfor %}
+{% if !l.now_x.is_empty() %}<div class="nowl" style="left: {{ l.now_x }}" aria-hidden="true"></div>{% endif %}
+{% for b in l.blocks %}<a class="fz{% if b.hit %} hit{% endif %}" href="{{ b.url }}" style="left: {{ b.x }}; width: {{ b.w }}px" tabindex="{% if loop.first %}0{% else %}-1{% endif %}" aria-label="{{ b.aria }}" data-t="{{ b.t }}" data-d="{{ b.d }}" data-from="{{ b.from }}" data-layout="{{ b.layout }}" data-acct="{{ b.acct }}" data-script="{{ b.script }}" data-client="{{ b.client }}" data-srv="{{ b.srv }}" data-cli="{{ b.cli }}" data-bin="{{ b.bin }}"><span class="s" style="width: {{ b.sw }}px"></span><span class="c"></span></a>{% endfor %}
+{% if let Some(h) = l.hit %}<span class="hl{% if h.left_side %} hl-l{% endif %}" style="left: {{ h.pos }}" aria-hidden="true"><b>{{ h.layout }}</b> · {{ h.acct }} <span class="mono">{{ h.d }}</span></span>{% endif %}
+</div>
+<span class="lnt"><span>{{ l.total }}</span> · {{ l.n }}{% if l.off %} · off{% endif %}</span>
+</div>
+{% endfor %}
+{% if !lz.more.is_empty() %}<div class="lzr ln"><span></span><a class="lmore" href="{{ lz.more_url }}">{{ lz.more }}</a><span></span></div>{% endif %}
+</div>
+<div class="lzf"><figcaption>{{ lz.caption }}{% if !lz.note.is_empty() %} <span class="muted">{{ lz.note }}</span>{% endif %}</figcaption>
+{% if !lz.table.is_empty() %}<details class="tv"><summary class="btn">Table view</summary>
+<div class="tw"><table class="t">
+<thead><tr><th>Time</th><th>Client</th><th>Layout</th><th>Account</th><th class="r">Duration</th><th class="r">Server</th></tr></thead>
+<tbody>{% for r in lz.table %}<tr><td class="mono"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td><td>{{ r.client }}</td><td>{{ r.layout }}</td><td class="mono">{{ r.acct }}</td><td class="r mono">{{ r.d }}</td><td class="r mono">{{ r.pct }}</td></tr>{% endfor %}</tbody>
+</table></div>{% if lz.table_more %}<div class="sub muted">The newest {{ lz.table.len() }} freezes. All freezes has the rest.</div>{% endif %}
+</details>{% endif %}
+{% if !lz.all_url.is_empty() %}<a href="{{ lz.all_url }}">All freezes</a>{% endif %}
+</div>
+</figure>

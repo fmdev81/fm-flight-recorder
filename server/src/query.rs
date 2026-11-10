@@ -674,6 +674,9 @@ pub struct ClientRow {
     pub first_seen_ms: i64,
     pub last_seen_ms: i64,
     pub connected: bool,
+    /// The latest session did not end with a `session_stop`: it is still
+    /// open, or the server closed it because the client went silent.
+    pub session_open: bool,
 }
 
 impl ClientRow {
@@ -690,7 +693,9 @@ impl ClientRow {
 
 pub fn clients(db: &Db, now: i64, connected_ms: i64) -> Vec<ClientRow> {
     let mut q = match db.prepare(
-        "SELECT id, name, machine, os, app, plugin, ip, first_seen_ms, last_seen_ms
+        "SELECT id, name, machine, os, app, plugin, ip, first_seen_ms, last_seen_ms,
+                (SELECT closed FROM sessions s WHERE s.client_id = clients.id
+                 ORDER BY coalesce(s.start_ms, s.first_seen_ms) DESC LIMIT 1)
          FROM clients ORDER BY name, id",
     ) {
         Ok(q) => q,
@@ -709,6 +714,9 @@ pub fn clients(db: &Db, now: i64, connected_ms: i64) -> Vec<ClientRow> {
             first_seen_ms: r.get(7)?,
             last_seen_ms: last,
             connected: last >= now - connected_ms,
+            session_open: r
+                .get::<_, Option<String>>(9)?
+                .is_some_and(|closed| closed != "stop"),
         })
     })
     .map(|rows| rows.flatten().collect())
@@ -744,7 +752,8 @@ pub fn version_lt(a: &str, b: &str) -> bool {
 pub struct Flags {
     /// (file, layout, p95 ms)
     pub p95: Vec<(String, String, u64)>,
-    /// (client id, name, minutes quiet)
+    /// "Silent, session open": (client id, name, minutes silent). The
+    /// latest session has no `session_stop` and nothing came for too long.
     pub quiet: Vec<(i64, String, i64)>,
     /// (client id, name, plug-in version)
     pub old: Vec<(i64, String, String)>,
@@ -774,7 +783,8 @@ pub fn flags(facts: &[Fact], clients: &[ClientRow], s: &Settings, now: i64) -> F
     let recent = now - FLAG_CLIENT_DAYS * DAY_MS;
     for c in clients.iter().filter(|c| c.last_seen_ms >= recent) {
         let quiet_ms = now - c.last_seen_ms;
-        if quiet_ms > s.flag_quiet_min as i64 * 60_000 {
+        // A client whose user quit FileMaker (session_stop) is not silent.
+        if c.session_open && quiet_ms > s.flag_quiet_min as i64 * 60_000 {
             f.quiet.push((c.id, c.label(), quiet_ms / 60_000));
         }
         if !c.plugin.is_empty() && version_lt(&c.plugin, &s.flag_plugin_min) {

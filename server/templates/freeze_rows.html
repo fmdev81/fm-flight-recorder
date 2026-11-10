@@ -1,3 +1,3 @@
-{% include "freeze_tr.html" %}
+{% import "macros.html" as m %}{% for r in v.rows %}{% call m::ftr(r, v.ctl.file.is_empty()) %}{% endfor %}
 <div class="more" id="fz-more" hx-swap-oob="true">{% if !v.more_url.is_empty() %}<button type="button" class="btn" hx-get="{{ v.more_url }}" hx-target="#fz-body" hx-swap="beforeend">Load more</button>{% endif %}</div>
 <h2 class="ct" id="fz-count" hx-swap-oob="true">{{ v.shown }} of {{ v.total }} freezes</h2>

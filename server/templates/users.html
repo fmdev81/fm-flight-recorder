@@ -38,16 +38,16 @@
 <td>{{ u.user }}</td>
 <td>{% if u.client_url.is_empty() %}{{ u.clients }}{% else %}<a class="lite" href="{{ u.client_url }}">{{ u.clients }}</a>{% endif %}</td>
 <td class="mono">{{ u.seen }}</td>
-<td class="r sep" data-v="{{ u.n_v }}">{{ u.n }}</td>
-<td class="r" data-v="{{ u.total_v }}">{{ u.total }}</td>
+<td class="r sep mono" data-v="{{ u.n_v }}">{{ u.n }}</td>
+<td class="r mono" data-v="{{ u.total_v }}">{{ u.total }}</td>
 <td>{% call m::split(u.split) %}</td>
-<td class="r" data-v="{{ u.pct_v }}">{{ u.pct }}</td>
-<td class="r sep">{{ u.n7 }}</td><td class="r">{{ u.total7 }}</td>
+<td class="r mono" data-v="{{ u.pct_v }}">{{ u.pct }}</td>
+<td class="r sep mono">{{ u.n7 }}</td><td class="r mono">{{ u.total7 }}</td>
 <td class="sep">{% if u.worst_url.is_empty() %}<span class="muted">{{ u.worst }}</span>{% else %}<a class="lite" href="{{ u.worst_url }}">{{ u.worst }}</a>{% endif %}</td>
 </tr>
 {% endfor %}
 </tbody>
-<tfoot><tr><td>All</td><td></td><td>{{ v.foot.clients }}</td><td></td><td class="r sep">{{ v.foot.n }}</td><td class="r">{{ v.foot.total }}</td><td>{% call m::split(v.foot.split) %}</td><td class="r">{{ v.foot.pct }}</td><td class="r sep">{{ v.foot.n7 }}</td><td class="r">{{ v.foot.total7 }}</td><td class="sep"></td></tr></tfoot>
+<tfoot><tr><td>All</td><td></td><td>{{ v.foot.clients }}</td><td></td><td class="r sep mono">{{ v.foot.n }}</td><td class="r mono">{{ v.foot.total }}</td><td>{% call m::split(v.foot.split) %}</td><td class="r mono">{{ v.foot.pct }}</td><td class="r sep mono">{{ v.foot.n7 }}</td><td class="r mono">{{ v.foot.total7 }}</td><td class="sep"></td></tr></tfoot>
 </table></div>{% endif %}
 </div>
 {% endblock %}

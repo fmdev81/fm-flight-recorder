@@ -1,5 +1,6 @@
-// Flight Recorder dashboard: charts (uPlot), hover readout, table sort,
-// theme switch, copy. No framework, no build step.
+// FM Flight Recorder dashboard: the client lanes (tooltip, arrow keys, REC
+// clock), charts (uPlot), hover readout, table sort, theme switch, copy.
+// No framework, no build step.
 (function () {
   "use strict";
 
@@ -30,7 +31,7 @@
   function ySplits(isMs) {
     return function (u, ai, min, max) {
       var steps = isMs ? MS_STEPS : N_STEPS, step = steps[steps.length - 1];
-      for (var i = 0; i < steps.length; i++) { if (max / steps[i] <= 4) { step = steps[i]; break; } }
+      for (var i = 0; i < steps.length; i++) { if (max / steps[i] <= 2) { step = steps[i]; break; } }
       var out = [];
       for (var v = 0; v <= max + 1e-9; v += step) out.push(v);
       return out;
@@ -92,7 +93,8 @@
     var xs = [];
     for (var i = 0; i < n; i++) xs.push(i);
     var server = css("--server"), client = css("--client"), ink2 = css("--ink2"),
-        line = css("--line"), muted = css("--muted");
+        faint = css("--faint");
+    var FONT = "11px 'IBM Plex Mono', ui-monospace, monospace";
     var bars = uPlot.paths.bars({ size: [0.72, 64], gap: 2 });
     var data, series;
     if (spec.kind === "stack") {
@@ -102,7 +104,8 @@
         { label: "Client time", fill: client, stroke: client, width: 0, paths: bars, points: { show: false } },
         { label: "Server wait", fill: server, stroke: server, width: 0, paths: bars, points: { show: false } }];
     } else {
-      var c = spec.color === "server" ? server : ink2;
+      // Counts and latency are neutral: blue and orange mean server and client only.
+      var c = withAlpha(ink2, 0.7);
       data = [xs, spec.n];
       series = [{}, { label: "Freezes", fill: c, stroke: c, width: 0, paths: bars, points: { show: false } }];
     }
@@ -115,14 +118,14 @@
       select: { show: false },
       scales: { x: { time: false, range: [-0.5, n - 0.5] }, y: { range: function (u, a, b) { return [0, b > 0 ? b * 1.08 : 1]; } } },
       axes: [
-        { stroke: muted, grid: { show: false }, ticks: { show: false }, font: "11px ui-monospace, Menlo, monospace",
+        { stroke: faint, grid: { show: false }, ticks: { show: false }, font: FONT,
           splits: function () { return xs; },
           values: function (u, splits) {
             var every = Math.ceil(n / Math.max(1, Math.floor(u.width / 44)));
             return splits.map(function (i) { return i % every === 0 ? spec.labels[i] : ""; });
           } },
-        { stroke: muted, size: 48, font: "11px ui-monospace, Menlo, monospace",
-          grid: { stroke: line, dash: [3, 3], width: 1 }, ticks: { show: false },
+        { stroke: faint, size: 48, font: FONT,
+          grid: { show: false }, ticks: { show: false }, border: { show: false },
           splits: ySplits(spec.kind === "stack"),
           values: function (u, splits) { return splits.map(yfmt); } }
       ],
@@ -135,6 +138,13 @@
     var u = new uPlot(opts, data, el);
     readout(card, spec, peak(spec));
     charts.push({ el: el, u: u });
+  }
+
+  function withAlpha(c, a) {
+    var m = /^#([0-9a-f]{6})$/i.exec(c);
+    if (!m) return c;
+    var n = parseInt(m[1], 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
 
   function drawAll() {
@@ -152,20 +162,33 @@
   });
 
   // ---------------------------------------------------------------- theme
-  function setTheme(t) {
-    var root = document.documentElement;
-    if (t === "light" || t === "dark") root.setAttribute("data-theme", t);
-    else root.removeAttribute("data-theme");
-    try { localStorage.setItem("fr-theme", t); } catch (e) { /* no storage */ }
-    var b = document.getElementById("theme");
-    if (b) b.textContent = t === "light" ? "Light" : t === "dark" ? "Dark" : "Auto";
-    drawAll();
-  }
+  // Dark is the default; the button cycles Dark -> Light -> Auto.
+  var THEME_NAME = { dark: "Dark", light: "Light", auto: "Auto" };
 
   function theme() {
-    var t = "auto";
-    try { t = localStorage.getItem("fr-theme") || "auto"; } catch (e) { /* no storage */ }
-    return t;
+    var t = null;
+    try { t = localStorage.getItem("fr-theme"); } catch (e) { /* no storage */ }
+    return t === "light" || t === "auto" ? t : "dark";
+  }
+
+  function showTheme(t) {
+    var b = document.getElementById("theme");
+    if (b) {
+      b.textContent = "Theme · " + THEME_NAME[t];
+      b.setAttribute("aria-label", "Theme: " + THEME_NAME[t].toLowerCase() + ". Change theme");
+    }
+    document.querySelectorAll("[data-theme-set]").forEach(function (x) {
+      x.setAttribute("aria-pressed", x.getAttribute("data-theme-set") === t ? "true" : "false");
+    });
+  }
+
+  function setTheme(t) {
+    var root = document.documentElement;
+    if (t === "auto") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", t);
+    try { localStorage.setItem("fr-theme", t); } catch (e) { /* no storage */ }
+    showTheme(t);
+    drawAll();
   }
 
   // ---------------------------------------------------------------- tables
@@ -201,8 +224,9 @@
     var t = e.target.closest("button, a");
     if (!t) return;
     if (t.id === "theme") {
-      var next = { auto: "light", light: "dark", dark: "auto" }[theme()] || "auto";
-      setTheme(next);
+      setTheme({ dark: "light", light: "auto", auto: "dark" }[theme()] || "dark");
+    } else if (t.hasAttribute("data-theme-set")) {
+      setTheme(t.getAttribute("data-theme-set"));
     } else if (t.classList.contains("sortb")) {
       sortTable(t);
     } else if (t.id === "token-toggle") {
@@ -231,16 +255,184 @@
   document.addEventListener("input", function (e) {
     if (e.target.id === "step-client-name") stepText();
   });
-  document.body.addEventListener("htmx:afterSwap", stepText);
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    stepText();
+    initLanes();
+    fadeAll();
+  });
+
+  // ---------------------------------------------------------------- lanes
+  // Tooltip on hover and focus, roving tabindex (one Tab stop per lane), the
+  // REC clock and the playhead. Without JS every block is a plain link.
+  function tipFor(fz) {
+    var lz = fz.closest(".lz");
+    if (!lz) return;
+    hideTip(lz);
+    var d = fz.dataset;
+    var tip = document.createElement("div");
+    tip.className = "lztip";
+    tip.setAttribute("role", "tooltip");
+    if (d.bin) {
+      add(tip, "span", "tt", d.bin);
+      add(tip, "span", "", "Longest " + d.d + " at " + d.t);
+    } else {
+      add(tip, "span", "tt", d.t + " · " + d.d);
+    }
+    var l1 = add(tip, "span", "tl1", "");
+    if (d.from) add(l1, "span", "", d.from + " → ");
+    l1.appendChild(document.createTextNode(d.layout));
+    add(tip, "span", "", d.client + " · " + d.acct + " · " + d.script);
+    add(tip, "span", "", "Server " + d.srv + " · Client " + d.cli);
+    add(tip, "span", "th", d.bin ? "Enter opens the longest freeze" : "Enter opens the freeze");
+    lz.appendChild(tip);
+    var lr = lz.getBoundingClientRect(), fr = fz.getBoundingClientRect();
+    var left = fr.left - lr.left;
+    left = Math.max(0, Math.min(left, lr.width - tip.offsetWidth));
+    tip.style.left = left + "px";
+    tip.style.top = (fr.bottom - lr.top + 8) + "px";
+  }
+
+  function hideTip(lz) {
+    (lz || document).querySelectorAll(".lztip").forEach(function (t) { t.remove(); });
+  }
+
+  function moveTo(from, to) {
+    if (!to) return;
+    var lane = from.closest(".ln");
+    if (lane) lane.querySelectorAll(".fz").forEach(function (b) { b.setAttribute("tabindex", "-1"); });
+    var lane2 = to.closest(".ln");
+    if (lane2) lane2.querySelectorAll(".fz").forEach(function (b) { b.setAttribute("tabindex", "-1"); });
+    to.setAttribute("tabindex", "0");
+    to.focus();
+  }
+
+  function nearest(lane, x) {
+    var best = null, bd = Infinity;
+    lane.querySelectorAll(".fz").forEach(function (b) {
+      var d = Math.abs(b.getBoundingClientRect().left - x);
+      if (d < bd) { bd = d; best = b; }
+    });
+    return best;
+  }
+
+  document.addEventListener("keydown", function (e) {
+    var fz = e.target.closest && e.target.closest(".fz");
+    if (!fz) return;
+    var lane = fz.closest(".ln");
+    var blocks = Array.prototype.slice.call(lane.querySelectorAll(".fz"));
+    var i = blocks.indexOf(fz);
+    var go = null;
+    if (e.key === "ArrowRight") go = blocks[i + 1];
+    else if (e.key === "ArrowLeft") go = blocks[i - 1];
+    else if (e.key === "Home") go = blocks[0];
+    else if (e.key === "End") go = blocks[blocks.length - 1];
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      var lanes = Array.prototype.slice.call(fz.closest(".lz").querySelectorAll(".ln"));
+      var j = lanes.indexOf(lane), x = fz.getBoundingClientRect().left;
+      var step = e.key === "ArrowDown" ? 1 : -1;
+      for (var k = j + step; k >= 0 && k < lanes.length; k += step) {
+        go = nearest(lanes[k], x);
+        if (go) break;
+      }
+    } else if (e.key === "Escape") { hideTip(fz.closest(".lz")); return; }
+    else return;
+    e.preventDefault();
+    moveTo(fz, go);
+  });
+  document.addEventListener("mouseover", function (e) {
+    var fz = e.target.closest && e.target.closest(".fz");
+    if (fz) tipFor(fz);
+  });
+  document.addEventListener("mouseout", function (e) {
+    var fz = e.target.closest && e.target.closest(".fz");
+    if (fz && !fz.contains(e.relatedTarget) && document.activeElement !== fz) hideTip(fz.closest(".lz"));
+  });
+  document.addEventListener("focusin", function (e) {
+    var fz = e.target.closest && e.target.closest(".fz");
+    if (fz) tipFor(fz);
+  });
+  document.addEventListener("focusout", function (e) {
+    var fz = e.target.closest && e.target.closest(".fz");
+    if (fz) hideTip(fz.closest(".lz"));
+  });
+
+  // The REC clock ticks from the server time at render (no client clock drift);
+  // the playhead moves once a minute.
+  function initLanes(root) {
+    (root || document).querySelectorAll("[data-lanes]").forEach(function (f) {
+      if (!f.dataset.t0) f.dataset.t0 = String(Date.now());
+      declutter(f);
+    });
+  }
+
+  // Hide the axis labels that the REC label covers.
+  function declutter(f) {
+    var rec = f.querySelector(".rec");
+    if (!rec) return;
+    var r = rec.getBoundingClientRect();
+    f.querySelectorAll(".tick").forEach(function (t) {
+      t.classList.remove("hid");
+      var b = t.getBoundingClientRect();
+      if (b.width && b.right > r.left - 8 && b.left < r.right + 8) t.classList.add("hid");
+    });
+  }
+
+  function hms(sec) {
+    sec = ((Math.floor(sec) % 86400) + 86400) % 86400;
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    return p(Math.floor(sec / 3600)) + ":" + p(Math.floor(sec / 60) % 60) + ":" + p(sec % 60);
+  }
+
+  var lastMin = -1;
+  function tick() {
+    var nowMin = Math.floor(Date.now() / 60000);
+    document.querySelectorAll("[data-lanes]").forEach(function (f) {
+      var c0 = f.dataset.clock0, t0 = +f.dataset.t0;
+      if (!c0 || !t0) return;
+      var el = (Date.now() - t0) / 1000;
+      var parts = c0.split(":");
+      var base = (+parts[0]) * 3600 + (+parts[1]) * 60 + (+parts[2]);
+      var clock = f.querySelector("[data-clock]");
+      if (clock) clock.textContent = hms(base + el);
+      if (nowMin !== lastMin && f.dataset.f0) {
+        var fr = Math.min(1, +f.dataset.f0 + el / 60 / Math.max(1, +f.dataset.win));
+        var ph = f.querySelector(".ph");
+        if (ph) ph.style.setProperty("--f", fr.toFixed(5));
+        var rec = f.querySelector(".rec");
+        if (rec) rec.style.left = (fr * 100).toFixed(3) + "%";
+        declutter(f);
+      }
+    });
+    lastMin = nowMin;
+  }
+
+  // ---------------------------------------------------------------- tables
+  // A right-edge fade while a wide table can still scroll.
+  function fade(tw) {
+    tw.classList.toggle("more-r", tw.clientWidth > 0 && tw.scrollLeft + tw.clientWidth < tw.scrollWidth - 4);
+  }
+  function fadeAll() { document.querySelectorAll(".tw").forEach(fade); }
+  document.addEventListener("scroll", function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains("tw")) fade(t);
+  }, true);
+  document.addEventListener("toggle", fadeAll, true);
+  window.addEventListener("resize", function () {
+    fadeAll();
+    document.querySelectorAll("[data-lanes]").forEach(declutter);
+  });
 
   function init() {
-    var b = document.getElementById("theme");
-    var t = theme();
-    if (b) b.textContent = t === "light" ? "Light" : t === "dark" ? "Dark" : "Auto";
+    showTheme(theme());
     drawAll();
     stepText();
+    initLanes();
+    fadeAll();
+    setInterval(tick, 1000);
+    // Canvas text does not re-render when the web fonts arrive.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { drawAll(); initLanes(); });
     if (window.matchMedia) {
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      var mq = window.matchMedia("(prefers-color-scheme: light)");
       var on = function () { if (theme() === "auto") drawAll(); };
       if (mq.addEventListener) mq.addEventListener("change", on);
     }

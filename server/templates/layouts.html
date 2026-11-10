@@ -26,17 +26,17 @@
 <td><a href="{{ r.url }}">{{ r.name }}</a></td>
 <td class="muted">{{ r.file }}</td>
 <td class="muted">{{ r.table }}</td>
-<td class="r" data-v="{{ r.n_v }}">{{ r.n }}</td>
-<td class="r" data-v="{{ r.total_v }}">{{ r.total }}</td>
+<td class="r mono" data-v="{{ r.n_v }}">{{ r.n }}</td>
+<td class="r mono" data-v="{{ r.total_v }}">{{ r.total }}</td>
 <td>{% call m::split(r.split) %}</td>
-<td class="r">{{ r.p50 }}</td>
-<td class="r" data-v="{{ r.p95_v }}">{% if r.flag %}<span class="flag">p95 {{ r.p95 }}</span>{% else %}{{ r.p95 }}{% endif %}</td>
-<td class="r">{{ r.rt }}</td>
-<td class="r" data-v="{{ r.pct_v }}">{{ r.pct }}</td>
+<td class="r mono">{{ r.p50 }}</td>
+<td class="r mono" data-v="{{ r.p95_v }}">{% if r.flag %}<span class="flag">p95 {{ r.p95 }}</span>{% else %}{{ r.p95 }}{% endif %}</td>
+<td class="r mono">{{ r.rt }}</td>
+<td class="r mono" data-v="{{ r.pct_v }}">{{ r.pct }}</td>
 </tr>
 {% endfor %}
 </tbody>
-<tfoot><tr><td>All</td><td></td><td></td><td class="r">{{ v.foot.n }}</td><td class="r">{{ v.foot.total }}</td><td>{% call m::split(v.foot.split) %}</td><td class="r">{{ v.foot.p50 }}</td><td class="r">{{ v.foot.p95 }}</td><td class="r">{{ v.foot.rt }}</td><td class="r">{{ v.foot.pct }}</td></tr></tfoot>
+<tfoot><tr><td>All</td><td></td><td></td><td class="r mono">{{ v.foot.n }}</td><td class="r mono">{{ v.foot.total }}</td><td>{% call m::split(v.foot.split) %}</td><td class="r mono">{{ v.foot.p50 }}</td><td class="r mono">{{ v.foot.p95 }}</td><td class="r mono">{{ v.foot.rt }}</td><td class="r mono">{{ v.foot.pct }}</td></tr></tfoot>
 </table></div>{% endif %}
 </div>
 {% endblock %}

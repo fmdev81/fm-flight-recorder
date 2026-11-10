@@ -4,11 +4,12 @@
 use crate::app::App;
 use crate::db::{Db, Settings};
 use crate::fmt::{self, dur, dur1, enc, num, pct, w};
+use crate::lanes::{self, Lanes, Mode};
 use crate::query::{
-    self, by_hour, day_aggs, facts, freezes_only, group, series, Agg, Bar, ClientRow, Fact, Filter,
-    Flags, Group, Kind, Range, RangeKind, DUR_LABELS, RT_LABELS,
+    self, day_aggs, facts, freezes_only, group, series, Agg, Bar, ClientRow, Fact, Filter, Flags,
+    Group, Kind, Range, RangeKind, DUR_LABELS, RT_LABELS,
 };
-use crate::tz::{Zone, DAY_MS, HOUR_MS};
+use crate::tz::{Zone, DAY_MS};
 use chrono::NaiveDate;
 use rusqlite::{params_from_iter, types::Value as Sql, OptionalExtension};
 use serde::Serialize;
@@ -37,6 +38,8 @@ pub struct Params {
     pub before: String,
     pub show: bool,
     pub shown: u64,
+    /// `lanes=all`: every client lane, no cap.
+    pub all_lanes: bool,
 }
 
 impl Params {
@@ -58,6 +61,7 @@ impl Params {
             before: g("before"),
             show: g("show") == "1",
             shown: g("shown").parse().unwrap_or(0),
+            all_lanes: g("lanes") == "all",
         }
     }
 
@@ -794,7 +798,7 @@ fn flags_view(f: &Flags, ctl: &Ctl, s: &Settings) -> FlagsView {
     FlagsView {
         count: f.count(),
         p95_label: format!("p95 over {}", dur(s.flag_p95_ms)),
-        quiet_label: format!("Quiet over {} min", s.flag_quiet_min),
+        quiet_label: format!("Silent, session open over {} min", s.flag_quiet_min),
         plugin_label: format!("Plug-in older than {}", s.flag_plugin_min),
         p95: f
             .p95
@@ -828,11 +832,83 @@ fn flags_view(f: &Flags, ctl: &Ctl, s: &Settings) -> FlagsView {
 
 fn quiet_text(min: i64) -> String {
     if min < 120 {
-        format!("quiet {min} min")
+        format!("silent {min} min")
     } else if min < 48 * 60 {
-        format!("quiet {} h", min / 60)
+        format!("silent {} h", min / 60)
     } else {
-        format!("quiet {} d", min / (24 * 60))
+        format!("silent {} d", min / (24 * 60))
+    }
+}
+
+/// Clients-mode lanes for today (Overview Today, Clients, the live fragment).
+pub fn today_lanes(ctx: &Ctx, p: &Params) -> Lanes {
+    let r = Range::today(ctx.z, ctx.now);
+    let file = p.file_opt();
+    let f = ctx.facts(&r, &Filter::file(&file));
+    let sess = sessions_between(ctx, r.start_ms, r.end_ms, None);
+    let mut qs = format!("range=today{}", lanes::file_qs(&file));
+    if p.all_lanes {
+        qs.push_str("&lanes=all");
+    }
+    lanes::build(
+        ctx,
+        lanes::Input {
+            mode: Mode::Clients,
+            title: "Who froze, when",
+            id: "lanes",
+            r: &r,
+            facts: &f,
+            sess: &sess,
+            all_lanes: p.all_lanes,
+            day_url: &|_| String::new(),
+            all_url: format!("/freezes?range=today{}", lanes::file_qs(&file)),
+            live_qs: Some(qs),
+        },
+    )
+}
+
+/// Days-mode lanes for a range, or None when only daily totals exist
+/// (more than 31 days, or all days past the event retention).
+fn day_lanes(
+    ctx: &Ctx,
+    r: &Range,
+    f: &[Fact],
+    sess: &[SessRow],
+    day_url: &dyn Fn(NaiveDate) -> String,
+    all_url: String,
+) -> Option<Lanes> {
+    if r.ndays() > 31 || r.to < ctx.cutoff {
+        return None;
+    }
+    Some(lanes::build(
+        ctx,
+        lanes::Input {
+            mode: Mode::Days,
+            title: "Who froze, when",
+            id: "lanes",
+            r,
+            facts: f,
+            sess,
+            all_lanes: true,
+            day_url,
+            all_url,
+            live_qs: None,
+        },
+    ))
+}
+
+/// A link to one day of a page ("range=custom&from=D&to=D").
+fn day_link(base: &str, d: NaiveDate) -> String {
+    let sep = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{sep}range=custom&from={d}&to={d}")
+}
+
+/// "none yet today" or "none in this range".
+fn none_text(r: &Range) -> &'static str {
+    if r.kind == RangeKind::Today {
+        "none yet today"
+    } else {
+        "none in this range"
     }
 }
 
@@ -840,6 +916,7 @@ pub struct Overview {
     pub ctl: Ctl,
     pub tiles: Vec<Tile>,
     pub flags: FlagsView,
+    pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
     pub layouts: Vec<NRow>,
@@ -862,39 +939,80 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
     let clients_hit: BTreeSet<i64> = fz.iter().map(|x| x.client_id).collect();
     let accounts: BTreeSet<&str> = fz.iter().map(|x| x.account.as_str()).collect();
     let connected = ctx.clients.iter().filter(|c| c.connected).count();
-    let mut t3 = tile(
-        "Waiting on server",
-        pct(a.share()),
-        format!("Server {} · Client {}", dur(a.wait), dur(a.client())),
-    );
-    t3.split = Some(Split::new(&a, a.total));
+    let none = none_text(&r);
+    let mut t3 = if a.n == 0 {
+        tile(
+            "Waiting on server",
+            "—".into(),
+            "no freezes to split".into(),
+        )
+    } else {
+        tile(
+            "Waiting on server",
+            pct(a.share()),
+            format!("Server {} · Client {}", dur(a.wait), dur(a.client())),
+        )
+    };
+    if a.n > 0 {
+        t3.split = Some(Split::new(&a, a.total));
+    }
     let mut t4 = tile(
         "Clients affected",
         num(clients_hit.len() as u64),
-        format!(
-            "{connected} connected · {} offline · {} accounts",
-            ctx.clients.len() - connected,
-            accounts.len()
-        ),
+        if a.n == 0 {
+            format!(
+                "{connected} connected · {} offline",
+                ctx.clients.len() - connected
+            )
+        } else {
+            format!(
+                "{connected} connected · {} offline · {} accounts",
+                ctx.clients.len() - connected,
+                accounts.len()
+            )
+        },
     );
     t4.small = format!("of {}", ctx.clients.len());
     t4.link = "/users".into();
-    let tiles = vec![
-        tile(
-            "Freezes",
-            num(a.n),
-            format!("p95 {} · {} script busy", dur(a.p95()), busy),
-        ),
-        tile(
-            "Time frozen",
-            dur(a.total),
-            format!("avg {} per freeze", dur1(a.avg_ms() as u64)),
-        ),
-        t3,
-        t4,
-    ];
+    let tiles = if a.n == 0 {
+        vec![
+            tile("Freezes", "0".into(), none.into()),
+            tile("Time frozen", "—".into(), none.into()),
+            t3,
+            t4,
+        ]
+    } else {
+        vec![
+            tile(
+                "Freezes",
+                num(a.n),
+                format!("p95 {} · {} script busy", dur(a.p95()), busy),
+            ),
+            tile(
+                "Time frozen",
+                dur(a.total),
+                format!("avg {} per freeze", dur1(a.avg_ms() as u64)),
+            ),
+            t3,
+            t4,
+        ]
+    };
     let (title, bars) = series(&f, ctx.z, &r, ctx.now);
     let flags = query::flags(&f, &ctx.clients, &ctx.s, ctx.now);
+    let lanes = if r.kind == RangeKind::Today {
+        Some(today_lanes(ctx, p))
+    } else {
+        let sess = sessions_between(ctx, r.start_ms, r.end_ms, None);
+        let fq = lanes::file_qs(&file);
+        day_lanes(
+            ctx,
+            &r,
+            &f,
+            &sess,
+            &|d| format!("{}{fq}", day_link("/", d)),
+            ctl.freezes_url(""),
+        )
+    };
     let layouts = group(&fz, |x| (x.file.clone(), x.layout.clone()));
     let scripts = group(&fz, |x| (x.file.clone(), x.script.clone()));
     let (recent, _) = freeze_rows(
@@ -911,8 +1029,9 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
     Overview {
         tiles,
         flags: flags_view(&flags, &ctl, &ctx.s),
+        lanes,
         chart_title: title.into(),
-        chart: Chart::stack(&bars, 180),
+        chart: Chart::stack(&bars, 160),
         layouts: nrows(&layouts, &ctl, "layout", 5, ctx),
         scripts: nrows(&scripts, &ctl, "script", 5, ctx),
         recent,
@@ -1027,10 +1146,10 @@ pub struct LayoutDetail {
     pub table: String,
     pub rank: String,
     pub tiles: Vec<Tile>,
+    pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
     pub days: Vec<DayRow>,
-    pub hours: Chart,
     pub by_dur: Hist,
     pub by_rt: Hist,
     pub users: Vec<NRow>,
@@ -1062,37 +1181,6 @@ fn day_rows(f: &[Fact], r: &Range) -> Vec<DayRow> {
             pct: pct(a.share()),
         })
         .collect()
-}
-
-/// Freezes by local hour of day (raw events), from the first to the last hour.
-fn hours_chart(f: &[Fact], z: Zone, r: &Range, now: i64) -> Chart {
-    if r.kind == RangeKind::Today {
-        let bars = by_hour(f, z, r, now);
-        return Chart::counts(
-            bars.iter().map(|b| b.label.clone()).collect(),
-            bars.iter().map(|b| b.title.clone()).collect(),
-            bars.iter().map(|b| b.n).collect(),
-            "n",
-            100,
-        );
-    }
-    let mut c = [0u64; 24];
-    for x in freezes_only(f).filter(|x| x.raw()) {
-        let h: usize = z.fmt(x.ts_ms, "%H").parse().unwrap_or(0);
-        c[h] += x.n;
-    }
-    let first = c.iter().position(|v| *v > 0).unwrap_or(8);
-    let last = c.iter().rposition(|v| *v > 0).unwrap_or(17);
-    let hs: Vec<usize> = (first..=last.max(first)).collect();
-    Chart::counts(
-        hs.iter().map(|h| format!("{h:02}")).collect(),
-        hs.iter()
-            .map(|h| format!("{h:02}:00–{:02}:00", h + 1))
-            .collect(),
-        hs.iter().map(|h| c[*h]).collect(),
-        "n",
-        100,
-    )
 }
 
 fn compare(ctx: &Ctx, p: &Params, r: &Range, f: &Filter) -> Option<(Range, Agg)> {
@@ -1186,10 +1274,25 @@ pub fn layout_detail(ctx: &Ctx, p: &Params) -> LayoutDetail {
         table,
         rank,
         tiles,
+        lanes: {
+            let base = format!("/layout?file={}&name={}", enc(&p.file), enc(&p.name));
+            day_lanes(
+                ctx,
+                &r,
+                &f,
+                &[],
+                &|d| day_link(&base, d),
+                format!(
+                    "/freezes?{}&file={}&layout={}",
+                    ctl.rq(),
+                    enc(&p.file),
+                    enc(&p.name)
+                ),
+            )
+        },
         chart_title: title.into(),
         chart: Chart::stack(&bars, 150),
         days: day_rows(&f, &r),
-        hours: hours_chart(&f, ctx.z, &r, ctx.now),
         by_dur: Hist::new(&DUR_LABELS, &a.dur_buckets(), "freezes"),
         by_rt: Hist::new(&RT_LABELS, &a.rt_buckets(), "freezes"),
         users: nrows(&users, &ctl, "user", 8, ctx),
@@ -1450,6 +1553,7 @@ pub struct ScriptDetail {
     pub file: String,
     pub tags: Vec<String>,
     pub tiles: Vec<Tile>,
+    pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
     pub by_dur: Hist,
@@ -1525,6 +1629,22 @@ pub fn script_detail(ctx: &Ctx, p: &Params) -> ScriptDetail {
         file: p.file.clone(),
         tags,
         tiles,
+        lanes: {
+            let base = format!("/script?file={}&name={}", enc(&p.file), enc(&p.name));
+            day_lanes(
+                ctx,
+                &r,
+                &f,
+                &[],
+                &|d| day_link(&base, d),
+                format!(
+                    "/freezes?{}&file={}&script={}",
+                    ctl.rq(),
+                    enc(&p.file),
+                    enc(&p.name)
+                ),
+            )
+        },
         chart_title: title.into(),
         chart: Chart::stack(&bars, 150),
         by_dur: Hist::new(&DUR_LABELS, &a.dur_buckets(), "runs"),
@@ -1764,6 +1884,7 @@ pub struct UserDetail {
     pub seen: String,
     pub connected: bool,
     pub tiles: Vec<Tile>,
+    pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
     pub layouts: Vec<NRow>,
@@ -1893,6 +2014,17 @@ pub fn user_detail(ctx: &Ctx, p: &Params) -> UserDetail {
         clients,
         seen: last.map(|t| ctx.when(t)).unwrap_or_else(|| "—".into()),
         tiles,
+        lanes: {
+            let base = format!("/user?account={}", enc(&p.account));
+            day_lanes(
+                ctx,
+                &r,
+                &f,
+                &[],
+                &|d| day_link(&base, d),
+                format!("/freezes?{}&account={}", ctl.rq(), enc(&p.account)),
+            )
+        },
         chart_title: title.into(),
         chart: Chart::stack(&bars, 160),
         layouts: nrows(&layouts, &ctl, "layout", 8, ctx),
@@ -1929,13 +2061,6 @@ pub struct CRow {
     pub total7: String,
     pub worst: String,
     pub worst_url: String,
-    pub strip: Strip,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Strip {
-    pub spans: Vec<(String, String, String)>,
-    pub ticks: Vec<String>,
 }
 
 pub struct Clients {
@@ -1946,7 +2071,7 @@ pub struct Clients {
     pub flag_count: usize,
     pub flag_chips: Vec<String>,
     pub rows: Vec<CRow>,
-    pub axis: Vec<String>,
+    pub lanes: Lanes,
 }
 
 pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
@@ -1973,27 +2098,6 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
         .collect();
     let max = gt.values().map(|g| g.freeze.total).max().unwrap_or(0);
     let flags = query::flags(&ft, &ctx.clients, &ctx.s, ctx.now);
-    // The strip axis: the hours of today's sessions.
-    let sess = sessions_between(ctx, today.start_ms, today.end_ms, None);
-    let mut lo = 8;
-    let mut hi = 18;
-    for s in &sess {
-        let a = ((s.start - today.start_ms) / HOUR_MS).clamp(0, 23);
-        let b = ((s.end - today.start_ms + HOUR_MS - 1) / HOUR_MS).clamp(1, 24);
-        lo = lo.min(a);
-        hi = hi.max(b);
-    }
-    let lo = lo - lo % 2;
-    let hi = (hi + hi % 2).min(24);
-    let (ax0, ax1) = (today.start_ms + lo * HOUR_MS, today.start_ms + hi * HOUR_MS);
-    let span = (ax1 - ax0).max(1) as f64;
-    let pos = |t: i64| {
-        format!(
-            "{:.2}%",
-            ((t - ax0) as f64 / span * 100.0).clamp(0.0, 100.0)
-        )
-    };
-    let axis: Vec<String> = (lo..=hi).step_by(2).map(|h| format!("{h:02}")).collect();
     let empty = Group::default();
     let mut rows: Vec<CRow> = ctx
         .clients
@@ -2015,27 +2119,6 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
                 .find(|x| x.client_id == c.id && x.layout == wl)
                 .map(|x| x.file.clone())
                 .unwrap_or_default();
-            let mut strip = Strip::default();
-            for s in sess.iter().filter(|s| s.client == c.id) {
-                strip.spans.push((
-                    pos(s.start),
-                    format!(
-                        "{:.2}%",
-                        ((s.end.min(ax1) - s.start.max(ax0)) as f64 / span * 100.0).max(0.4)
-                    ),
-                    format!(
-                        "{}–{}",
-                        ctx.z.fmt(s.start, "%H:%M"),
-                        ctx.z.fmt(s.end, "%H:%M")
-                    ),
-                ));
-            }
-            for x in ft
-                .iter()
-                .filter(|x| x.client_id == c.id && x.kind == Kind::Freeze && x.total >= 2000)
-            {
-                strip.ticks.push(pos(x.ts_ms));
-            }
             CRow {
                 id: c.id,
                 name: c.label(),
@@ -2071,7 +2154,6 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
                     ctl.layout_url(&wfile, &wl)
                 },
                 worst: if wl.is_empty() { "—".into() } else { wl },
-                strip,
             }
         })
         .collect();
@@ -2118,7 +2200,7 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
     }
     let mut chips = vec![];
     if !flags.quiet.is_empty() {
-        chips.push(format!("quiet > {} min", ctx.s.flag_quiet_min));
+        chips.push(format!("silent > {} min", ctx.s.flag_quiet_min));
     }
     if !flags.old.is_empty() {
         chips.push(format!("plug-in < {}", ctx.s.flag_plugin_min));
@@ -2141,7 +2223,7 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
         flag_count: flags.quiet.len() + flags.old.len(),
         flag_chips: chips,
         rows,
-        axis,
+        lanes: today_lanes(ctx, p),
         ctl,
     }
 }
@@ -2227,6 +2309,7 @@ pub struct ClientDetail {
     pub users: Vec<NRow>,
     pub layouts: Vec<NRow>,
     pub srtt: Hist,
+    pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
     pub events: Vec<FRow>,
@@ -2376,6 +2459,14 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
         users: nrows(&users, &ctl, "user", 8, ctx),
         layouts: nrows(&layouts, &ctl, "layout", 8, ctx),
         srtt,
+        lanes: day_lanes(
+            ctx,
+            &r,
+            &f,
+            &range_sess,
+            &|d| day_link(&format!("/client?id={id}"), d),
+            format!("/freezes?{}&client={id}", ctl.rq()),
+        ),
         chart_title: title.into(),
         chart: Chart::stack(&bars, 150),
         events,
@@ -2620,6 +2711,7 @@ pub struct FreezeDetail {
     pub connected: bool,
     pub net: Vec<(String, String, String)>,
     pub marks: Vec<MarkRow>,
+    pub strip: Option<Lanes>,
     pub around: Vec<FRow>,
 }
 
@@ -2712,6 +2804,7 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
             connected: false,
             net: vec![],
             marks: vec![],
+            strip: None,
             around: vec![],
         };
     };
@@ -2971,6 +3064,18 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
     } else {
         wt as f64 / d as f64 * 100.0
     };
+    let strip = {
+        let (a, b) = (ts - 15 * 60_000, ts + 15 * 60_000);
+        let sr = Range::custom(ctx.z, ctx.z.date_of(a), ctx.z.date_of(b));
+        let sf = ctx.facts(
+            &sr,
+            &Filter {
+                client: Some(cid),
+                ..Default::default()
+            },
+        );
+        Some(lanes::strip(ctx, cid, ts, id, &sf))
+    };
     FreezeDetail {
         found: true,
         id,
@@ -3022,6 +3127,7 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
         connected: conn != 0,
         net,
         marks: mark_rows,
+        strip,
         around: arows,
         ctl,
     }
