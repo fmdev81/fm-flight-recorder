@@ -289,7 +289,12 @@
     var left = fr.left - lr.left;
     left = Math.max(0, Math.min(left, lr.width - tip.offsetWidth));
     tip.style.left = left + "px";
-    tip.style.top = (fr.bottom - lr.top + 8) + "px";
+    // Below the block, unless it would run past the lanes and cover the
+    // summary line and its buttons: then above the block.
+    var below = fr.bottom - lr.top + 8;
+    var top = below + tip.offsetHeight <= lr.height ? below : fr.top - lr.top - tip.offsetHeight - 8;
+    tip.style.top = top + "px";
+    tip.classList.toggle("up", top < below);
   }
 
   function hideTip(lz) {
@@ -365,15 +370,20 @@
     });
   }
 
-  // Hide the axis labels that the REC label covers.
+  // Hide the axis labels that the REC label or the playhead covers. Labels
+  // just after now come hidden from the server; show them when they are clear.
   function declutter(f) {
     var rec = f.querySelector(".rec");
     if (!rec) return;
     var r = rec.getBoundingClientRect();
+    var ph = f.querySelector(".ph");
+    var px = ph ? ph.getBoundingClientRect().left + 1 : null;
     f.querySelectorAll(".tick").forEach(function (t) {
-      t.classList.remove("hid");
       var b = t.getBoundingClientRect();
-      if (b.width && b.right > r.left - 8 && b.left < r.right + 8) t.classList.add("hid");
+      if (!b.width) return;
+      var hit = (b.right > r.left - 10 && b.left < r.right + 10) ||
+        (px !== null && b.left - 6 < px && b.right + 6 > px);
+      t.classList.toggle("hid", hit);
     });
   }
 

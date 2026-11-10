@@ -40,6 +40,9 @@ pub struct Tick {
     pub wide: bool,
     /// Shown below 800 px.
     pub narrow: bool,
+    /// Just after the playhead, where the REC label may cover it. Hidden
+    /// until app.js measures that it is clear of the label.
+    pub near: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -441,12 +444,15 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     while (h as f64) * 60.0 <= hi {
         let m = h as f64 * 60.0;
         let near_now = playhead && (m - now_m).abs() < 25.0;
+        // The REC label is about 150 px wide: up to a quarter of the window.
+        let under_rec = playhead && m > now_m && m - now_m <= (hi - lo) * 0.25;
         if !near_now && (h % 2 == 0 || h % 3 == 0) {
             out.axis.push(Tick {
                 x: pc(win.x(m)),
                 label: format!("{h:02}:00"),
                 wide: h % 2 == 0,
                 narrow: h % 3 == 0,
+                near: under_rec,
             });
         }
         h += 1;
@@ -803,6 +809,7 @@ pub fn strip(ctx: &Ctx, client: i64, at: i64, id: i64, facts: &[Fact]) -> Lanes 
             label: z.fmt(t, "%H:%M"),
             wide: true,
             narrow: (t / 60_000) % 10 == 0,
+            near: false,
         });
         t += 5 * 60_000;
     }
