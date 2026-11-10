@@ -134,7 +134,7 @@ const FILES: [(&str, &[L], &[&str]); 4] = [
 
 const ACCOUNTS: [(&str, &str); 9] = [
     ("arivera", "A. Rivera"),
-    ("jpatel", "J. Patel"),
+    ("dbrooks", "D. Brooks"),
     ("warehouse", "Warehouse"),
     ("kchen", "K. Chen"),
     ("mokafor", "M. Okafor"),
