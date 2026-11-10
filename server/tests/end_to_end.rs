@@ -363,7 +363,10 @@ fn setup_saves_the_settings_and_makes_a_new_token() {
     }
     let page = text(&get(&base, "/setup").body);
     // A form without the send fields keeps the live defaults.
-    assert!(page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"), "{page}");
+    assert!(
+        page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"),
+        "{page}"
+    );
     let form2 = format!("{form}&rec_send_ms=1000&rec_ping_s=30");
     let r = request(
         &base,
@@ -484,7 +487,10 @@ fn pages_mark_their_live_parts_and_work_without_js() {
     }
     // The lanes and the chart are live parts too.
     let page = get(&base, "/").body;
-    assert!(page.contains("\" data-live aria-labelledby=") || page.contains("id=\"chart-card\" data-live"));
+    assert!(
+        page.contains("\" data-live aria-labelledby=")
+            || page.contains("id=\"chart-card\" data-live")
+    );
     // The page script opens the stream.
     let js = get(&base, "/static/app.js").body;
     assert!(js.contains("new EventSource(\"/api/v1/live\")"));
@@ -499,7 +505,9 @@ fn sidebar_toggle_is_hidden_without_js_and_compact_tiles_are_styled() {
     assert!(page.contains("title=\"Collapse sidebar ([)\" hidden>"));
     assert!(page.contains("<nav class=\"nav\" id=\"side-nav\""));
     // The state comes from localStorage before the first paint, in try/catch.
-    assert!(page.contains("try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"));
+    assert!(page.contains(
+        "try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"
+    ));
     let js = get(&base, "/static/app.js").body;
     assert!(js.contains("try { localStorage.setItem(\"fr-side\""));
     let css = get(&base, "/static/app.css").body;
@@ -551,14 +559,26 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     let sessions = fake::generate(&o, app.zone);
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     let page = get(&base, "/").body;
-    let fig = &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
+    let fig =
+        &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
     // Hover is enough: a block is a span with a title (no JS) and the data
     // for the tooltip, not a link to the Freeze page.
     assert!(fig.contains("<span class=\"fz"));
     assert!(!fig.contains("<a class=\"fz"));
     let blocks = fig.split("class=\"lzf\"").next().unwrap();
-    assert!(!blocks.contains("href=\"/freeze?id="), "no block links to a freeze");
-    for a in ["data-t=", "data-layout=", "data-script=", "data-acct=", "data-srv=", "data-cli=", "data-pct="] {
+    assert!(
+        !blocks.contains("href=\"/freeze?id="),
+        "no block links to a freeze"
+    );
+    for a in [
+        "data-t=",
+        "data-layout=",
+        "data-script=",
+        "data-acct=",
+        "data-srv=",
+        "data-cli=",
+        "data-pct=",
+    ] {
         assert!(fig.contains(a), "{a}");
     }
     // No label on the track that can hide a block.

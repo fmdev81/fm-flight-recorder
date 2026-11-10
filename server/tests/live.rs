@@ -64,7 +64,11 @@ impl Stream {
 fn wait_streams(app: &fr_server::app::Shared, n: usize) {
     let t = Instant::now();
     while app.live.streams() != n {
-        assert!(t.elapsed() < Duration::from_secs(5), "{} streams", app.live.streams());
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "{} streams",
+            app.live.streams()
+        );
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -74,19 +78,33 @@ fn a_stored_batch_reaches_open_pages_at_once() {
     let (app, base, _d) = server("live-batch");
     let (st, head) = Stream::open(&base);
     assert!(head.starts_with("HTTP/1.1 200"), "{head}");
-    assert!(head.to_ascii_lowercase().contains("content-type: text/event-stream"), "{head}");
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "{head}"
+    );
     assert_eq!(st.next(Duration::from_secs(2)).unwrap().0, "hello");
     wait_streams(&app, 1);
 
     let t0 = Instant::now();
-    let r = post_json(&base, "/api/v1/events", Some(&app.token()), &doc_examples()[0]);
+    let r = post_json(
+        &base,
+        "/api/v1/events",
+        Some(&app.token()),
+        &doc_examples()[0],
+    );
     assert_eq!(r.status, 200, "{}", r.body);
     let (ev, data) = st.next(Duration::from_secs(2)).expect("no live event");
     assert_eq!((ev.as_str(), data.as_str()), ("events", "2"));
     assert!(t0.elapsed() < Duration::from_secs(1), "{:?}", t0.elapsed());
 
     // A resend stores nothing, so the pages hear nothing.
-    let r = post_json(&base, "/api/v1/events", Some(&app.token()), &doc_examples()[0]);
+    let r = post_json(
+        &base,
+        "/api/v1/events",
+        Some(&app.token()),
+        &doc_examples()[0],
+    );
     assert_eq!(r.status, 200);
     assert!(st.next(Duration::from_millis(300)).is_none());
 
@@ -107,7 +125,10 @@ fn a_ping_from_a_new_client_is_a_client_event_once() {
         .expect("ping example");
     let r = post_json(&base, "/api/v1/ping", Some(&app.token()), &ping);
     assert_eq!(r.status, 200, "{}", r.body);
-    assert_eq!(st.next(Duration::from_secs(2)).unwrap(), ("client".into(), "1".into()));
+    assert_eq!(
+        st.next(Duration::from_secs(2)).unwrap(),
+        ("client".into(), "1".into())
+    );
     // The next ping of a connected client changes nothing on the pages.
     let r = post_json(&base, "/api/v1/ping", Some(&app.token()), &ping);
     assert_eq!(r.status, 200);

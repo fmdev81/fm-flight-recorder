@@ -1107,9 +1107,15 @@ mod tests {
         assert_eq!((c.send_interval_ms, c.send_ping_ms), (500, 15_000));
         // Clamped to the safe range.
         c.apply_options("send_ms=0; ping_ms=1");
-        assert_eq!((c.send_interval_ms, c.send_ping_ms), (SEND_MS_MIN, PING_MS_MIN));
+        assert_eq!(
+            (c.send_interval_ms, c.send_ping_ms),
+            (SEND_MS_MIN, PING_MS_MIN)
+        );
         c.apply_options("SEND_MS=999999; ping_ms=99999999");
-        assert_eq!((c.send_interval_ms, c.send_ping_ms), (SEND_MS_MAX, PING_MS_MAX));
+        assert_eq!(
+            (c.send_interval_ms, c.send_ping_ms),
+            (SEND_MS_MAX, PING_MS_MAX)
+        );
         // A bad value is reported and the old value stays.
         let r = c.apply_options("send_ms=fast");
         assert_eq!(r.ignored, vec!["send_ms=fast".to_string()]);

@@ -398,13 +398,16 @@ fn ticks(lo: f64, hi: f64, playhead: bool, now_m: f64) -> Vec<Tick> {
                 // The REC label is about 150 px wide: up to a quarter of the window.
                 let under_rec = playhead && m > now_m && m - now_m <= (hi - lo) * 0.25;
                 if !near_now {
-                    out.push((win.x(m), Tick {
-                        x: pc(win.x(m)),
-                        label: hm(m, secs),
-                        wide: t % s1 == 0,
-                        narrow: t % s2 == 0,
-                        near: under_rec,
-                    }));
+                    out.push((
+                        win.x(m),
+                        Tick {
+                            x: pc(win.x(m)),
+                            label: hm(m, secs),
+                            wide: t % s1 == 0,
+                            narrow: t % s2 == 0,
+                            near: under_rec,
+                        },
+                    ));
                 }
             }
             t += step;
@@ -623,7 +626,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     });
     if zwin.is_some() {
         out.zoom_reset = link("");
-        let at = if has_today { now } else { z.day_start(inp.r.to) };
+        let at = if has_today {
+            now
+        } else {
+            z.day_start(inp.r.to)
+        };
         out.zoom_label = format!(
             "{}–{} {}",
             hm(lo, span_min < 10.0),
@@ -858,10 +865,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
             );
         }
         (_, None) if zwin.is_some() => {
-            out.caption = format!(
-                "No freezes from {}.",
-                out.zoom_label.replace('–', " to ")
-            );
+            out.caption = format!("No freezes from {}.", out.zoom_label.replace('–', " to "));
         }
         (Mode::Clients, Some(t)) => {
             let nclients = {
@@ -1102,8 +1106,15 @@ mod tests {
     fn zoom_ticks_fit_the_window() {
         // 15 minutes: a label every 2 min (wide), 5 min (narrow).
         let t = ticks(600.0, 615.0, false, 0.0);
-        let wide: Vec<&str> = t.iter().filter(|x| x.wide).map(|x| x.label.as_str()).collect();
-        assert_eq!(wide, ["10:00", "10:02", "10:04", "10:06", "10:08", "10:10", "10:12", "10:14"]);
+        let wide: Vec<&str> = t
+            .iter()
+            .filter(|x| x.wide)
+            .map(|x| x.label.as_str())
+            .collect();
+        assert_eq!(
+            wide,
+            ["10:00", "10:02", "10:04", "10:06", "10:08", "10:10", "10:12", "10:14"]
+        );
         assert!(t.iter().filter(|x| x.narrow).count() <= 5);
         // 2 minutes: seconds in the labels.
         let t = ticks(600.0, 602.0, false, 0.0);
