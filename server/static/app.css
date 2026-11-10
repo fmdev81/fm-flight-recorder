@@ -128,6 +128,7 @@ input.fsel{padding-right:8px;background-image:none}
 .cmp{color:var(--muted)}
 .muted{color:var(--muted)}
 .grid{display:grid;gap:16px}
+.lv{display:contents}
 .g-tiles{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 .g-tiles4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .g-2{grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))}

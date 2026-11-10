@@ -433,3 +433,36 @@ fn fonts_are_in_the_binary_and_the_early_morning_shows_standby() {
     }
     assert!(!t.contains("0.00\u{a0}s"), "no divide-by-zero values");
 }
+
+#[test]
+fn pages_mark_their_live_parts_and_work_without_js() {
+    let (app, base, _d) = server("live-parts");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    // Each part that app.js swaps has an id and data-live, on the page
+    // that the browser gets without JS.
+    let want: [(&str, &[&str]); 4] = [
+        ("/", &["ov-flags", "ov-tiles", "ov-worst", "ov-latest", "srv"]),
+        ("/freezes", &["fz-list", "srv"]),
+        ("/clients", &["cl-tiles", "cl-table", "srv"]),
+        ("/setup", &["srv"]),
+    ];
+    for (path, ids) in want {
+        let r = get(&base, path);
+        assert_eq!(r.status, 200, "{path}");
+        for id in ids {
+            assert!(
+                r.body.contains(&format!("id=\"{id}\" data-live")),
+                "{path}: no live part {id}"
+            );
+        }
+    }
+    // The lanes and the chart are live parts too.
+    let page = get(&base, "/").body;
+    assert!(page.contains("\" data-live aria-labelledby=") || page.contains("id=\"chart-card\" data-live"));
+    // The page script opens the stream.
+    let js = get(&base, "/static/app.js").body;
+    assert!(js.contains("new EventSource(\"/api/v1/live\")"));
+}

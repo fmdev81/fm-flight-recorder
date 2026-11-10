@@ -24,7 +24,7 @@
 {% endmacro %}
 
 {% macro chart(title, c) %}
-<div class="card">
+<div class="card" id="chart-card" data-live>
 <div class="ch"><h2 class="ct">{{ title }}</h2>{% call keys() %}</div>
 {% if c.is_empty() %}<div class="empty">No freezes</div>{% else %}
 <div class="readout sub" aria-live="polite"></div>

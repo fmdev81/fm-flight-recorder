@@ -45,7 +45,7 @@
 </form>
 {% endblock %}
 {% block content %}
-<div class="card">
+<div class="card" id="fz-list" data-live>
 <div class="ch"><h2 class="ct" id="fz-count">{{ v.shown }} of {{ v.total }} freezes</h2>{% call m::keys() %}</div>
 {% if v.rows.is_empty() %}<div class="empty">No freezes</div>{% else %}
 <div class="tw tall fade"><table class="t ft">

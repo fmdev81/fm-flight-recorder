@@ -6,7 +6,7 @@
 {% include "controls.html" %}
 {% endblock %}
 {% block content %}
-<div class="card flagbar">
+<div class="card flagbar" id="ov-flags" data-live>
 <h2 class="ct">Flags</h2>{% if v.flags.count > 0 %}<span class="flag">{{ v.flags.count }}</span>{% else %}<span class="muted">0</span>{% endif %}
 <span class="fgrp"><span class="lbl">{{ v.flags.p95_label }}</span>{% for x in v.flags.p95 %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}{% if v.flags.p95.is_empty() %}<span class="muted">none</span>{% endif %}</span>
 <span class="fgrp"><span class="lbl">{{ v.flags.plugin_label }}</span>{% for x in v.flags.old %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}{% if v.flags.old.is_empty() %}<span class="muted">none</span>{% endif %}</span>
@@ -14,11 +14,11 @@
 <a class="thr" href="/setup#s-flags">Thresholds</a>
 </div>
 
-{% call m::tiles(v.tiles, "g-tiles4") %}
+<div class="lv" id="ov-tiles" data-live>{% call m::tiles(v.tiles, "g-tiles4") %}</div>
 
 {% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 
-<div class="grid g-2">
+<div class="grid g-2" id="ov-worst" data-live>
 <div class="card">
 <div class="ch"><h2 class="ct">Worst layouts</h2><a href="/layouts?{{ v.ctl.qs() }}" class="ca">All layouts</a></div>
 {% if v.layouts.is_empty() %}<div class="empty">No freezes</div>{% else %}
@@ -46,7 +46,7 @@
 </div>
 </div>
 
-<div class="card">
+<div class="card" id="ov-latest" data-live>
 <div class="ch"><h2 class="ct">Latest freezes</h2><a href="/freezes?{{ v.ctl.qs() }}" class="ca">All freezes</a></div>
 {% include "freeze_table.html" %}
 </div>

@@ -256,6 +256,12 @@
     if (e.target.id === "step-client-name") stepText();
   });
   document.body.addEventListener("htmx:afterSwap", function (e) {
+    // "Load more" grew the list: live updates leave it alone from now on.
+    var tg = e.detail && e.detail.target;
+    if (tg && tg.id === "fz-body") {
+      var fl = document.getElementById("fz-list");
+      if (fl) fl.setAttribute("data-grown", "1");
+    }
     stepText();
     initLanes();
     fadeAll();
@@ -432,13 +438,94 @@
     document.querySelectorAll("[data-lanes]").forEach(declutter);
   });
 
+  // ---------------------------------------------------------------- live
+  // One EventSource (GET /api/v1/live) for the page. The server sends a hint
+  // when new events are stored or a client connects or goes offline. Then the
+  // page fetches its own URL again (same filters) and swaps each [data-live]
+  // part (matched by id) whose server HTML changed. At most one fetch each
+  // second, and only while the tab is visible; a hidden tab catches up when
+  // it shows again. Without JS (or EventSource) the pages are as before.
+  var live = { src: {}, busy: false, dirty: false, last: 0, timer: null, hello: false };
+
+  function liveSnap(root) {
+    (root || document).querySelectorAll("[data-live][id]").forEach(function (el) {
+      live.src[el.id] = el.outerHTML;
+    });
+  }
+
+  // Parts that the user changed by hand stay as they are.
+  function liveKeep(el) {
+    if (el.hasAttribute("data-grown")) return true;
+    if (el.querySelector('.sortb[aria-pressed="true"]')) return true;
+    var a = document.activeElement;
+    return !!(a && el.contains(a) && a.matches("input, select, textarea"));
+  }
+
+  function liveSwap(doc) {
+    var redraw = false;
+    document.querySelectorAll("[data-live][id]").forEach(function (el) {
+      var nu = doc.getElementById(el.id);
+      if (!nu) return;
+      var html = nu.outerHTML;
+      if (html === live.src[el.id] || liveKeep(el)) return;
+      live.src[el.id] = html;
+      var open = Array.prototype.map.call(el.querySelectorAll("details"), function (d) { return d.open; });
+      nu.querySelectorAll("details").forEach(function (d, i) { if (open[i]) d.open = true; });
+      hideTip(el);
+      var imp = document.importNode(nu, true);
+      el.replaceWith(imp);
+      if (window.htmx) window.htmx.process(imp);
+      if (imp.querySelector(".chart[data-chart]")) redraw = true;
+    });
+    if (redraw) drawAll();
+    initLanes();
+    fadeAll();
+  }
+
+  function liveLater(ms) {
+    live.dirty = true;
+    if (!live.timer) live.timer = setTimeout(function () { live.timer = null; liveFetch(); }, ms);
+  }
+
+  function liveFetch() {
+    if (document.visibilityState !== "visible") { live.dirty = true; return; }
+    var wait = live.last + 1000 - Date.now();
+    if (live.busy || wait > 0) { liveLater(Math.max(wait, 200)); return; }
+    live.busy = true;
+    live.dirty = false;
+    live.last = Date.now();
+    fetch(location.href, { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (t) { if (t) liveSwap(new DOMParser().parseFromString(t, "text/html")); })
+      .catch(function () { /* the next hint tries again */ })
+      .then(function () {
+        live.busy = false;
+        if (live.dirty) liveLater(200);
+      });
+  }
+
+  function liveStart() {
+    if (!window.EventSource || !window.fetch || !document.querySelector("[data-live][id]")) return;
+    var es = new EventSource("/api/v1/live");
+    es.addEventListener("events", liveFetch);
+    es.addEventListener("client", liveFetch);
+    // A second hello means the stream came back (server restart): catch up.
+    es.addEventListener("hello", function () { if (live.hello) liveFetch(); live.hello = true; });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible" && live.dirty) liveFetch();
+    });
+  }
+
   function init() {
+    // The server HTML of the live parts, before the scripts below change it.
+    liveSnap();
     showTheme(theme());
     drawAll();
     stepText();
     initLanes();
     fadeAll();
     setInterval(tick, 1000);
+    liveStart();
     // Canvas text does not re-render when the web fonts arrive.
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { drawAll(); initLanes(); });
     if (window.matchMedia) {
