@@ -1,24 +1,25 @@
 //! Number and time formats for the pages.
 
-/// Frozen time: "41.6 s", "3 m 05 s", "2 h 07 m".
+/// Frozen time: "41.6 s", "3 m 05 s", "2 h 07 m". The spaces are
+/// no-break spaces (U+00A0), so a value never breaks inside.
 pub fn dur(ms: u64) -> String {
     let s = ms as f64 / 1000.0;
     if s < 59.95 {
-        return format!("{s:.1} s");
+        return format!("{s:.1}\u{a0}s");
     }
     let total = s.round() as u64;
     if total < 3600 {
-        format!("{} m {:02} s", total / 60, total % 60)
+        format!("{}\u{a0}m\u{a0}{:02}\u{a0}s", total / 60, total % 60)
     } else {
         let m = (total + 30) / 60;
-        format!("{} h {:02} m", m / 60, m % 60)
+        format!("{}\u{a0}h\u{a0}{:02}\u{a0}m", m / 60, m % 60)
     }
 }
 
-/// One freeze: "2.31 s", "12.4 s", "1 m 02 s".
+/// One freeze: "2.31 s", "12.4 s", "1 m 02 s" (no-break spaces).
 pub fn dur1(ms: u64) -> String {
     if ms < 10_000 {
-        format!("{:.2} s", ms as f64 / 1000.0)
+        format!("{:.2}\u{a0}s", ms as f64 / 1000.0)
     } else {
         dur(ms)
     }
@@ -131,10 +132,10 @@ mod tests {
 
     #[test]
     fn formats() {
-        assert_eq!(dur(41_600), "41.6 s");
-        assert_eq!(dur(185_000), "3 m 05 s");
-        assert_eq!(dur(7_620_000), "2 h 07 m");
-        assert_eq!(dur1(2_310), "2.31 s");
+        assert_eq!(dur(41_600), "41.6\u{a0}s");
+        assert_eq!(dur(185_000), "3\u{a0}m\u{a0}05\u{a0}s");
+        assert_eq!(dur(7_620_000), "2\u{a0}h\u{a0}07\u{a0}m");
+        assert_eq!(dur1(2_310), "2.31\u{a0}s");
         assert_eq!(num(1_704_220), "1\u{202F}704\u{202F}220");
         assert_eq!(num(12), "12");
         assert_eq!(change(57.0, 50.0), "+14%");

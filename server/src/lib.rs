@@ -14,6 +14,7 @@ pub mod db;
 pub mod fake;
 pub mod fmt;
 pub mod import;
+pub mod lanes;
 pub mod log;
 pub mod query;
 pub mod rollup;

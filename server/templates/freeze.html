@@ -30,7 +30,7 @@
 <div class="card">
 <div class="ch"><h2 class="ct">Timeline</h2><span class="key"><span class="sw sw-s"></span>{{ v.srv_label }}</span><span class="key"><span class="sw sw-c"></span>{{ v.cli_label }}</span>{% if !v.marks.is_empty() %}<span class="key"><span class="sw sw-m"></span>Mark</span>{% endif %}</div>
 <div class="tl">
-{% for a in v.axis %}<div class="ax" style="left: {{ a.0 }}"></div><div class="axl" style="left: {{ a.0 }}">{{ a.1 }}</div>{% endfor %}
+{% for a in v.axis %}<div class="axl" style="left: {{ a.0 }}">{{ a.1 }}</div>{% endfor %}
 <div style="position: absolute; top: 4px; left: 0; right: 0; height: 36px">
 {% for mk in v.tl_marks %}<div class="mk" style="top: {{ mk.1 }}; left: {{ mk.0 }}"><i></i><span class="mono">{{ mk.2 }}</span></div>{% endfor %}
 </div>
@@ -68,10 +68,12 @@
 </div>
 </div>
 
+{% if let Some(lz) = v.strip %}{% include "lanes.html" %}{% endif %}
+
 <div class="card">
 <div class="ch"><h2 class="ct"><a href="{{ v.client_url }}">{{ v.client }}</a> · around this freeze</h2></div>
 {% if v.around.is_empty() %}<div class="empty">No events</div>{% else %}
-<div class="tw"><table class="t">
+<div class="tw fade"><table class="t">
 <thead><tr><th>Time</th><th>Type</th><th>Account</th><th>Layout</th><th>Script</th><th class="r">Duration</th><th class="r">Round trips</th><th class="r">Server</th></tr></thead>
 <tbody>
 {% for r in v.around %}
@@ -80,7 +82,7 @@
 <td><a href="{{ r.user_url }}" class="mono">{{ r.account }}</a> <span class="muted">{{ r.user }}</span></td>
 <td><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
 <td>{% if r.script_url.is_empty() %}<span class="muted">{{ r.script }}</span>{% else %}<a class="lite" href="{{ r.script_url }}">{{ r.script }}</a>{% endif %}</td>
-<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td><td class="r">{{ r.pct }}</td></tr>
+<td class="r mono">{{ r.dur }}</td><td class="r mono">{{ r.rt }}</td><td class="r mono">{{ r.pct }}</td></tr>
 {% endfor %}
 </tbody></table></div>{% endif %}
 </div>

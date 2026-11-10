@@ -1,4 +1,2 @@
 {% include "token_block.html" %}
-<pre class="code wrap" id="step" hx-swap-oob="true"><span class="muted"># OnFirstWindowOpen</span>
-<span class="fn">Set Variable</span> [ $fr ; Value:
-  <span id="step-calc" data-base="{{ v.start_calc() }}">{{ v.start_calc() }}</span> ]</pre>
+{% let oob = true %}{% include "step.html" %}

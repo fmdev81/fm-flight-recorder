@@ -400,3 +400,49 @@ fn flags_use_the_thresholds() {
     s.flag_plugin_min = "0.1.0".into();
     assert_eq!(query::flags(&f, &cl, &s, now).count(), 0);
 }
+
+#[test]
+fn silent_flag_needs_a_session_without_session_stop() {
+    let mut db = db::open_memory();
+    let z = zone();
+    let now = parse_ts("2026-11-10T12:00:00Z").unwrap();
+    let base = parse_ts("2026-11-10T09:00:00Z").unwrap();
+    let evs: Vec<Ev> = vec![(base, 900, 0, "L", "amy", "freeze")];
+    store(&mut db, &"a".repeat(32), &evs, now - 50 * 60_000);
+    let s = settings();
+    let r = Range::today(z, now);
+    let cut = rollup::cutoff_day(z, 30, now);
+    let silent = |db: &Db| {
+        let f = facts(db, z, &r, cut, &Filter::default());
+        query::flags(&f, &query::clients(db, now, 120_000), &s, now).quiet
+    };
+    // The server closes a silent session ("offline"): no session_stop came.
+    rollup::close_offline_sessions(&db, now, 120_000).unwrap();
+    let q = silent(&db);
+    assert_eq!(q.len(), 1, "silent 50 min, session not stopped");
+    assert_eq!(q[0].2, 50);
+    // The user quit FileMaker: the session ended with session_stop.
+    db.execute("UPDATE sessions SET closed = 'stop'", [])
+        .unwrap();
+    assert!(silent(&db).is_empty(), "a stopped session is not silent");
+    // A newer session that was not stopped counts again; the latest wins.
+    // (Session "a" has no session_start, so it starts when it was first seen.)
+    store(&mut db, &"b".repeat(32), &evs, now - 40 * 60_000);
+    db.execute(
+        "UPDATE sessions SET start_ms = ?1 WHERE session_id = ?2",
+        rusqlite::params![now - 45 * 60_000, "b".repeat(32)],
+    )
+    .unwrap();
+    let q = silent(&db);
+    assert_eq!(q.len(), 1);
+    assert_eq!(q[0].2, 40);
+    // Below the threshold nothing is flagged.
+    let mut s2 = settings();
+    s2.flag_quiet_min = 45;
+    let f = facts(&db, z, &r, cut, &Filter::default());
+    assert!(
+        query::flags(&f, &query::clients(&db, now, 120_000), &s2, now)
+            .quiet
+            .is_empty()
+    );
+}

@@ -185,18 +185,39 @@ fn every_page_renders_with_synthetic_data() {
         let s = app.settings(&db);
         rollup::run(&mut db, z, &s, fr_server::tz::now_ms()).unwrap();
     }
-    let lists: [(&str, &[&str]); 10] = [
+    let lists: [(&str, &[&str]); 13] = [
         (
             "/",
             &[
                 "Flags",
-                "Frozen time by",
+                "Who froze, when",
+                "Silent, session open",
                 "Worst layouts",
                 "Worst scripts",
                 "Latest freezes",
             ],
         ),
-        ("/?range=7d", &["Frozen time by day", "Clients affected"]),
+        (
+            "/?range=7d",
+            &[
+                "Who froze, when",
+                "Clients affected",
+                "Table view",
+                "/freeze?id=",
+            ],
+        ),
+        (
+            "/fragment/lanes?range=today",
+            &["Who froze, when", "hx-trigger=\"every 30s"],
+        ),
+        (
+            "/static/licenses.txt",
+            &["htmx", "uPlot", "IBM Plex", "SIL Open Font License"],
+        ),
+        (
+            "/static/app.css",
+            &["IBM Plex Sans", "IBM Plex Mono", "--link"],
+        ),
         (
             "/?range=custom&from=2026-10-01&to=2026-12-01",
             &["Frozen time by day"],
@@ -227,7 +248,7 @@ fn every_page_renders_with_synthetic_data() {
         ),
         (
             "/clients",
-            &["Sessions today", "FileMaker Pro", "0.0.9", "Connected"],
+            &["Who froze, when", "FileMaker Pro", "0.0.9", "Connected"],
         ),
         ("/freezes?range=7d", &["freezes", "Load more", "Clear"]),
         (
@@ -293,7 +314,7 @@ fn every_page_renders_with_synthetic_data() {
         .to_string();
     let r = get(&base, &more);
     assert_eq!(r.status, 200);
-    assert!(r.body.contains("<tr>") && r.body.contains("fz-count"));
+    assert!(r.body.contains("<tr class=\"fr\">") && r.body.contains("fz-count"));
     let j = get(&base, "/api/v1/freezes?range=7d");
     assert_eq!(j.status, 200);
     let v: serde_json::Value = serde_json::from_str(&j.body).unwrap();
@@ -374,4 +395,41 @@ fn setup_saves_the_settings_and_makes_a_new_token() {
     assert_eq!(r.status, 200);
     assert_ne!(app.token(), old);
     assert!(r.body.contains(&app.token()));
+}
+
+#[test]
+fn fonts_are_in_the_binary_and_the_early_morning_shows_standby() {
+    let (_app, base, _dir) = server("fonts");
+    for f in [
+        "IBMPlexSans-Regular-Latin1",
+        "IBMPlexSans-Regular-Latin2",
+        "IBMPlexSans-Regular-Pi",
+        "IBMPlexSans-Medium-Latin1",
+        "IBMPlexSans-Medium-Latin2",
+        "IBMPlexSans-SemiBold-Latin1",
+        "IBMPlexSans-SemiBold-Latin2",
+        "IBMPlexMono-Regular-Latin1",
+        "IBMPlexMono-Medium-Latin1",
+        "IBMPlexMono-Regular-Pi",
+    ] {
+        let r = get(&base, &format!("/static/fonts/{f}.woff2"));
+        assert_eq!(r.status, 200, "{f}");
+        assert!(r.body.starts_with("wOF2"), "{f} is woff2");
+    }
+    assert_eq!(get(&base, "/static/fonts/other.woff2").status, 404);
+    // No clients and no sessions: the recorder is on standby, the tiles say so.
+    let r = get(&base, "/");
+    assert_eq!(r.status, 200);
+    let t = text(&r.body);
+    for w in [
+        "STANDBY",
+        "No freezes yet today",
+        "none yet today",
+        "no freezes to split",
+        "FM Flight Recorder",
+        "Theme · Dark",
+    ] {
+        assert!(t.contains(w), "/: {w}");
+    }
+    assert!(!t.contains("0.00\u{a0}s"), "no divide-by-zero values");
 }

@@ -12,7 +12,7 @@
 <h2 class="ct" id="s-server">Server</h2>
 <div class="row">
 <span class="k">Status</span>
-<div class="rowc"><span class="pill"><span class="dot dot-ok"></span>Listening</span><span class="sub">{{ v.since }} · v{{ shell.footer.server_version }}</span></div>
+<div class="rowc"><span class="pill"><span class="dot dot-ok"></span>Listening</span><span class="sub">{{ v.since }} · FM Flight Recorder server {{ shell.footer.server_version }}</span></div>
 <label for="srv-addr">Address</label>
 <div class="rowc"><input id="srv-addr" class="inp mono" type="text" value="{{ v.url }}" readonly></div>
 <label for="srv-bind">Listen on</label>
@@ -21,6 +21,8 @@
 {% include "token_block.html" %}
 <span class="k">Dashboard</span>
 <div class="rowc"><span class="sub">LAN · no sign-in</span></div>
+<span class="k" id="theme-k">Theme</span>
+<div class="rowc"><div class="seg" role="group" aria-labelledby="theme-k" id="theme-seg"><button type="button" data-theme-set="dark" aria-pressed="false">Dark</button><button type="button" data-theme-set="light" aria-pressed="false">Light</button><button type="button" data-theme-set="auto" aria-pressed="false">Auto</button></div><span class="sub">this browser only</span></div>
 <span class="k">Files</span>
 <div class="rowc"><span class="sub">{{ v.files }}</span></div>
 </div>
@@ -31,7 +33,7 @@
 <div class="row">
 <label for="fl-p95">Layout p95 over</label>
 <div class="rowc"><input id="fl-p95" form="setup-form" name="flag_p95_s" class="inp n" type="number" value="{{ v.p95_s }}" step="0.1" min="0.1"><span class="sub">s</span>{% if v.flag_p95 > 0 %}<span class="flag">{{ v.flag_p95 }} {% if v.flag_p95 == 1 %}layout{% else %}layouts{% endif %}</span>{% endif %}</div>
-<label for="fl-quiet">Client quiet after</label>
+<label for="fl-quiet">Silent while session open after</label>
 <div class="rowc"><input id="fl-quiet" form="setup-form" name="flag_quiet_min" class="inp n" type="number" value="{{ v.s.flag_quiet_min }}" step="1" min="1"><span class="sub">min</span>{% if v.flag_quiet > 0 %}<span class="flag">{{ v.flag_quiet }} {% if v.flag_quiet == 1 %}client{% else %}clients{% endif %}</span>{% endif %}</div>
 <label for="fl-plugin">Plug-in older than</label>
 <div class="rowc"><input id="fl-plugin" form="setup-form" name="flag_plugin_min" class="inp n mono" type="text" value="{{ v.s.flag_plugin_min }}">{% if v.flag_old > 0 %}<span class="flag">{{ v.flag_old }} {% if v.flag_old == 1 %}client{% else %}clients{% endif %}</span>{% endif %}</div>
@@ -74,9 +76,7 @@
 <input id="step-client-name" class="inp" type="text" placeholder="Client name" aria-label="Client name" style="max-width: 200px">
 <button type="button" class="btn btn-p" id="step-copy">Copy</button>
 </div>
-<pre class="code wrap" id="step"><span class="muted"># OnFirstWindowOpen</span>
-<span class="fn">Set Variable</span> [ $fr ; Value:
-  <span id="step-calc" data-base="{{ v.start_calc() }}">{{ v.start_calc() }}</span> ]</pre>
+{% include "step.html" %}
 <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
 <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">Sent with each event</span><span class="mono" style="font-size: 12.5px">account · user · host · file</span></div>
 <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">Clients using this token</span><span>{{ v.clients }}</span></div>

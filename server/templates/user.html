@@ -17,7 +17,7 @@
 {% block content %}
 {% call m::tiles(v.tiles, "g-tiles") %}
 
-{% call m::chart(v.chart_title, v.chart) %}
+{% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 
 <div class="grid g-2">
 <div class="card"><div class="ch"><h2 class="ct">Layouts</h2></div>{% call m::ntable(v.layouts, "Layout", false) %}</div>

@@ -20,16 +20,19 @@
 {% if !v.found %}<div class="card"><div class="empty">No client</div></div>{% else %}
 {% call m::tiles(v.tiles, "g-tiles") %}
 
-<div class="grid g-2">
+{% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
+
 <div class="card">
 <div class="ch"><h2 class="ct">Sessions</h2><span class="sub">7 days</span></div>
 {% if v.sessions.is_empty() %}<div class="empty">No sessions</div>{% else %}
-<div class="tw"><table class="t">
+<div class="tw fade"><table class="t">
 <thead><tr><th>Day</th><th>Start</th><th>Stop</th><th class="r">Freezes</th><th class="r">Frozen</th><th class="r">Heartbeats</th><th>FileMaker</th><th>Plug-in</th></tr></thead>
 <tbody>
-{% for s in v.sessions %}<tr><td class="mono">{{ s.day }}</td><td class="mono">{{ s.start }}</td><td>{% if s.open %}<span class="pill"><span class="dot dot-ok"></span>Open</span>{% else %}<span class="mono">{{ s.stop }}</span>{% endif %}</td><td class="r">{{ s.n }}</td><td class="r">{{ s.total }}</td><td class="r">{{ s.heartbeats }}</td><td>{{ s.app }}</td><td>{{ s.plugin }}</td></tr>{% endfor %}
+{% for s in v.sessions %}<tr><td class="mono">{{ s.day }}</td><td class="mono">{{ s.start }}</td><td>{% if s.open %}<span class="pill"><span class="dot dot-ok"></span>Open</span>{% else %}<span class="mono">{{ s.stop }}</span>{% endif %}</td><td class="r mono">{{ s.n }}</td><td class="r mono">{{ s.total }}</td><td class="r mono">{{ s.heartbeats }}</td><td>{{ s.app }}</td><td>{{ s.plugin }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 </div>
+
+<div class="grid g-2">
 <div class="card">
 <div class="ch"><h2 class="ct">Plug-in options</h2><span class="sub">session_start{% if !v.options_when.is_empty() %} · {{ v.options_when }}{% endif %}</span></div>
 {% if v.options.is_empty() %}<div class="empty">No session_start</div>{% else %}
@@ -37,14 +40,12 @@
 {% for o in v.options %}<tr><td class="k">{{ o.0 }}</td><td class="mono">{{ o.1 }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 </div>
+<div class="card"><div class="ch"><h2 class="ct">SRTT by hour</h2><span class="sub">ms</span></div>{% call m::hist(v.srtt, "") %}</div>
 </div>
 
-{% call m::chart(v.chart_title, v.chart) %}
-
-<div class="grid g-3">
+<div class="grid g-2">
 <div class="card"><div class="ch"><h2 class="ct">Users</h2></div>{% call m::ntable(v.users, "Account", true) %}</div>
 <div class="card"><div class="ch"><h2 class="ct">Layouts</h2></div>{% call m::ntable(v.layouts, "Layout", false) %}</div>
-<div class="card"><div class="ch"><h2 class="ct">SRTT by hour</h2><span class="sub">ms</span></div>{% call m::hist(v.srtt, "srv") %}</div>
 </div>
 
 <div class="card">

@@ -12,12 +12,10 @@
 {% block content %}
 {% call m::tiles(v.tiles, "g-tiles") %}
 
-<div class="grid g-2">
-{% call m::chart(v.chart_title, v.chart) %}
-<div class="card"><div class="ch"><h2 class="ct">Runs by duration</h2></div>{% call m::hist(v.by_dur, "") %}</div>
-</div>
+{% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 
 <div class="grid g-2">
+<div class="card"><div class="ch"><h2 class="ct">Runs by duration</h2></div>{% call m::hist(v.by_dur, "") %}</div>
 <div class="card"><div class="ch"><h2 class="ct">Users</h2></div>{% call m::ntable(v.users, "Account", true) %}</div>
 <div class="card"><div class="ch"><h2 class="ct">Layouts</h2><span class="sub">layout after freeze</span></div>{% call m::ntable(v.layouts, "Layout", false) %}</div>
 </div>
@@ -25,7 +23,7 @@
 <div class="card">
 <div class="ch"><h2 class="ct">Runs that froze</h2><span class="sub">latest</span></div>
 {% if v.runs.is_empty() %}<div class="empty">No freezes</div>{% else %}
-<div class="tw"><table class="t">
+<div class="tw fade"><table class="t">
 <thead><tr><th>Time</th><th>Account</th><th>Client</th><th>From</th><th>Layout</th><th>Mark</th><th class="r">Duration</th><th class="r">Round trips</th><th style="width: 120px">Server / client</th><th class="r">Server</th></tr></thead>
 <tbody>
 {% for r in v.runs %}
@@ -35,9 +33,9 @@
 <td class="muted">{{ r.from }}</td>
 <td><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
 <td class="muted">{{ r.marks }}</td>
-<td class="r">{{ r.dur }}</td><td class="r">{{ r.rt }}</td>
+<td class="r mono">{{ r.dur }}</td><td class="r mono">{{ r.rt }}</td>
 <td><div class="hb" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
-<td class="r">{{ r.pct }}</td></tr>
+<td class="r mono">{{ r.pct }}</td></tr>
 {% endfor %}
 </tbody></table></div>{% endif %}
 </div>
