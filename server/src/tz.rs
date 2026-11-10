@@ -89,6 +89,41 @@ impl Zone {
         self.fmt(ms, "%H:%M:%S")
     }
 
+    /// The zone abbreviation at `ms`: "CST", "CDT". Zones with no letters
+    /// give "UTC−06:00".
+    pub fn abbr(&self, ms: i64) -> String {
+        let a = self.fmt(ms, "%Z");
+        if a.chars().any(|c| c.is_ascii_alphabetic()) {
+            a
+        } else {
+            self.offset_label(ms)
+        }
+    }
+
+    /// The one time format of the pages: "Today 15:54:22" for today,
+    /// "Nov 9, 15:54:22" for another day of this year, "Dec 30 2025, 15:54:22"
+    /// for an older year. Local time of the server zone, 24 h.
+    pub fn stamp(&self, ms: i64, now: i64) -> String {
+        let (d, today) = (self.date_of(ms), self.date_of(now));
+        if d == today {
+            format!("Today {}", self.hms(ms))
+        } else if d.format("%Y").to_string() == today.format("%Y").to_string() {
+            self.fmt(ms, "%b %-d, %H:%M:%S")
+        } else {
+            self.fmt(ms, "%b %-d %Y, %H:%M:%S")
+        }
+    }
+
+    /// `stamp` with the zone: "Today 15:54:22 CST" (tooltips).
+    pub fn stamp_tz(&self, ms: i64, now: i64) -> String {
+        format!("{} {}", self.stamp(ms, now), self.abbr(ms))
+    }
+
+    /// The full time with the date and zone: "Tue, Nov 10, 2026, 15:54:22 CST".
+    pub fn full(&self, ms: i64) -> String {
+        format!("{} {}", self.fmt(ms, "%a, %b %-d, %Y, %H:%M:%S"), self.abbr(ms))
+    }
+
     /// "UTC−06:00" at `ms` (with a real minus sign).
     pub fn offset_label(&self, ms: i64) -> String {
         let secs = self.at(ms).offset().fix().local_minus_utc();
@@ -111,6 +146,22 @@ pub fn now_ms() -> i64 {
 
 pub fn iso(ms: i64) -> String {
     fm_flight_recorder::eventlog::iso_from_unix_ms(ms)
+}
+
+/// "just now", "45 s ago", "12 min ago", "3 h 05 min ago", "2 d ago".
+pub fn ago(ms: i64, now: i64) -> String {
+    let s = (now - ms).max(0) / 1000;
+    if s < 10 {
+        "just now".into()
+    } else if s < 60 {
+        format!("{s} s ago")
+    } else if s < 3600 {
+        format!("{} min ago", s / 60)
+    } else if s < 86_400 {
+        format!("{} h {:02} min ago", s / 3600, (s % 3600) / 60)
+    } else {
+        format!("{} d ago", s / 86_400)
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +211,25 @@ mod tests {
             .collect();
         // 01:00 comes twice on the day DST ends.
         assert_eq!(labels, ["00", "01", "01", "02"]);
+    }
+
+    #[test]
+    fn one_time_format_with_the_zone() {
+        let z = Zone::new("America/Chicago").unwrap();
+        let now = parse_ts("2026-11-10T21:54:22Z").unwrap();
+        assert_eq!(z.stamp(now, now), "Today 15:54:22");
+        assert_eq!(z.stamp_tz(now, now), "Today 15:54:22 CST");
+        let y = parse_ts("2026-11-09T15:04:05Z").unwrap();
+        assert_eq!(z.stamp(y, now), "Nov 9, 09:04:05");
+        let old = parse_ts("2025-12-30T18:00:00Z").unwrap();
+        assert_eq!(z.stamp(old, now), "Dec 30 2025, 12:00:00");
+        assert_eq!(z.full(now), "Tue, Nov 10, 2026, 15:54:22 CST");
+        let summer = parse_ts("2026-07-01T12:00:00Z").unwrap();
+        assert_eq!(z.abbr(summer), "CDT");
+        assert_eq!(ago(now - 5_000, now), "just now");
+        assert_eq!(ago(now - 45_000, now), "45 s ago");
+        assert_eq!(ago(now - 125_000, now), "2 min ago");
+        assert_eq!(ago(now - 3_900_000, now), "1 h 05 min ago");
     }
 
     #[test]
