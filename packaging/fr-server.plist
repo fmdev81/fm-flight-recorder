@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- launchd job for the Flight Recorder companion server.
      Copy to ~/Library/LaunchAgents/com.solutionscay.fr-server.plist.
-     Replace USER with the macOS user name. See README.md. -->
+     Replace USER with the macOS user name.
+     See https://github.com/solutionscay/fm-flight-recorder/wiki/Companion-server -->
 <plist version="1.0">
 <dict>
   <key>Label</key>

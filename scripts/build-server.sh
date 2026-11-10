@@ -4,7 +4,7 @@
 #
 #   scripts/build-server.sh
 #
-# It does not install anything. See README.md: Run the companion server.
+# It does not install anything. See https://github.com/solutionscay/fm-flight-recorder/wiki/Companion-server
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

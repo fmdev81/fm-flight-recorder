@@ -4,7 +4,7 @@
 //! Written from the FMWrapper headers of the Claris plug-in SDK
 //! (FMXExtern.h, FMXCalcEngine.h). Checked against SDK 26.0.3.307
 //! (fm_plugin_sdk_26.0.3.307.zip): same struct layout, kCurrentExtnVersion 77.
-//! We do not copy the headers into this repo; see docs/sdk-notes.md.
+//! We do not copy the headers into this repo; see https://github.com/solutionscay/fm-flight-recorder/wiki/SDK-notes.
 
 /// FMX_ExternCallStruct (FMXExtern.h). macOS: `__attribute__((packed))`.
 /// On LP64 `fmx::unusedid` is int32. Size must be 74 bytes.

@@ -1,6 +1,6 @@
 //! FileMaker plug-in glue: `FMExternCallProc` and the external functions.
 //!
-//! Rules this code keeps (see docs/sdk-notes.md):
+//! Rules this code keeps (see https://github.com/solutionscay/fm-flight-recorder/wiki/SDK-notes):
 //! * FileMaker calls the entry point and the external functions on its main
 //!   thread. Only that thread calls FMWrapper. The recorder threads never do.
 //! * Idle handling is cheap: an atomic heartbeat, and at most every 250 ms

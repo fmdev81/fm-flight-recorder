@@ -96,7 +96,7 @@ Request:
 
 - `v` (top level) is the version of this envelope. It is 1.
 - `events[]` items are the lines of the JSONL log, with the same fields
-  ([docs/design.md](design.md), "Log format"). Each line has `seq` and `session_id`.
+  ([Log format](https://github.com/solutionscay/fm-flight-recorder/wiki/Design#log-format) in the wiki). Each line has `seq` and `session_id`.
   The `session_id` of each line must be the same as the top-level `session_id`.
 - The events in a batch are in `seq` order. A batch can repeat events that the server has
   (a retry).
