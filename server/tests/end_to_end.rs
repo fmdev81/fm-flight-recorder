@@ -596,3 +596,30 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     // A bad span is the day view.
     assert_eq!(get(&base, "/?span=x-y").status, 200);
 }
+
+#[test]
+fn client_srtt_shows_median_and_p95_per_clock_hour() {
+    let (app, base, _d) = server("srtt");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    let clients = get(&base, "/clients").body;
+    let id = clients
+        .split("href=\"/client?id=")
+        .nth(1)
+        .unwrap()
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .unwrap()
+        .to_string();
+    let page = get(&base, &format!("/client?id={id}&range=7d")).body;
+    let t = text(&page);
+    assert!(t.contains("SRTT by hour"));
+    assert!(t.contains("network round-trip time"));
+    assert!(t.contains("Median") && t.contains("p95"));
+    // A value in ms, on a fixed scale, per clock hour (with the day when it
+    // is not today, so two days do not mix).
+    assert!(page.contains("class=\"rb\""));
+    assert!(page.contains("\u{a0}ms</td>"));
+}

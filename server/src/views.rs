@@ -2351,6 +2351,79 @@ pub struct SessView {
     pub plugin: String,
 }
 
+/// One hour of "SRTT by hour" on the Client page.
+#[derive(Debug, Clone, Default)]
+pub struct SrttRow {
+    pub hour: String,
+    pub n: String,
+    pub p50: String,
+    pub p95: String,
+    /// Bar widths on a fixed scale (at least `SRTT_SCALE_MS`).
+    pub w50: String,
+    pub w95: String,
+    pub title: String,
+}
+
+/// The smallest full scale of the SRTT bars: a LAN value of 1 ms stays a
+/// short bar, and does not fill the bar as the largest value.
+pub const SRTT_SCALE_MS: u64 = 50;
+
+/// SRTT (the smoothed TCP round-trip time to FileMaker Server, from macOS)
+/// of the freezes of each clock hour, newest hour first. A value of 0 means
+/// "no reading" and is left out. Median and p95, nearest rank.
+pub fn srtt_by_hour(ctx: &Ctx, fz: &[Fact]) -> Vec<SrttRow> {
+    let mut by_h: BTreeMap<i64, Vec<u64>> = BTreeMap::new();
+    for x in fz.iter().filter(|x| x.raw() && x.srtt > 0) {
+        // The start of the clock hour (not the hour of the day, so two days
+        // do not mix).
+        let h = x.ts_ms - (x.ts_ms - ctx.z.day_start(x.day)).rem_euclid(crate::tz::HOUR_MS);
+        by_h.entry(h).or_default().push(x.srtt);
+    }
+    let q = |v: &[u64], p: f64| {
+        let rank = ((p * v.len() as f64).ceil() as usize).clamp(1, v.len());
+        v[rank - 1]
+    };
+    let rows: Vec<(i64, usize, u64, u64)> = by_h
+        .into_iter()
+        .rev()
+        .take(24)
+        .map(|(h, mut v)| {
+            v.sort_unstable();
+            (h, v.len(), q(&v, 0.5), q(&v, 0.95))
+        })
+        .collect();
+    let max = rows
+        .iter()
+        .map(|r| r.3)
+        .max()
+        .unwrap_or(0)
+        .max(SRTT_SCALE_MS);
+    rows.into_iter()
+        .map(|(h, n, p50, p95)| {
+            let hour = format!(
+                "{}–{}",
+                {
+                    let t = ctx.when(h);
+                    t.strip_suffix(":00").map(str::to_string).unwrap_or(t)
+                },
+                ctx.z.fmt(h + crate::tz::HOUR_MS, "%H:%M")
+            );
+            SrttRow {
+                title: format!(
+                    "{hour} {}: median {p50} ms, p95 {p95} ms, {n} freezes",
+                    ctx.z.abbr(h)
+                ),
+                hour,
+                n: num(n as u64),
+                p50: format!("{p50}\u{a0}ms"),
+                p95: format!("{p95}\u{a0}ms"),
+                w50: w(p50, max),
+                w95: w(p95, max),
+            }
+        })
+        .collect()
+}
+
 pub struct ClientDetail {
     pub ctl: Ctl,
     pub found: bool,
@@ -2368,7 +2441,7 @@ pub struct ClientDetail {
     pub options_when: String,
     pub users: Vec<NRow>,
     pub layouts: Vec<NRow>,
-    pub srtt: Hist,
+    pub srtt: Vec<SrttRow>,
     pub lanes: Option<Lanes>,
     pub chart_title: String,
     pub chart: Chart,
@@ -2458,27 +2531,7 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
     }
     let users = group(&fz, |x| (String::new(), x.account.clone()));
     let layouts = group(&fz, |x| (x.file.clone(), x.layout.clone()));
-    // SRTT by hour (median of the freezes in each hour).
-    let mut by_h: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    for x in fz.iter().filter(|x| x.raw() && x.srtt > 0) {
-        by_h.entry(ctx.z.fmt(x.ts_ms, "%H"))
-            .or_default()
-            .push(x.srtt);
-    }
-    let labels: Vec<String> = by_h.keys().cloned().collect();
-    let vals: Vec<u64> = by_h
-        .values()
-        .map(|v| {
-            let mut s = v.clone();
-            s.sort_unstable();
-            s[(s.len() - 1) / 2]
-        })
-        .collect();
-    let lref: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
-    let mut srtt = Hist::new(&lref, &vals, "ms");
-    for b in srtt.bars.iter_mut() {
-        b.title = format!("{}:00 · {} ms", b.label, b.n);
-    }
+    let srtt = srtt_by_hour(ctx, &fz);
     let (title, bars) = series(&f, ctx.z, &r, ctx.now);
     let (events, _) = freeze_rows(
         ctx,
