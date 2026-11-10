@@ -489,3 +489,20 @@ fn pages_mark_their_live_parts_and_work_without_js() {
     let js = get(&base, "/static/app.js").body;
     assert!(js.contains("new EventSource(\"/api/v1/live\")"));
 }
+
+#[test]
+fn sidebar_toggle_is_hidden_without_js_and_compact_tiles_are_styled() {
+    let (_app, base, _d) = server("sidebar");
+    let page = get(&base, "/").body;
+    // The toggle starts hidden: without JS the sidebar stays open.
+    assert!(page.contains("id=\"side-toggle\" aria-controls=\"side-nav\" aria-expanded=\"true\""));
+    assert!(page.contains("title=\"Collapse sidebar ([)\" hidden>"));
+    assert!(page.contains("<nav class=\"nav\" id=\"side-nav\""));
+    // The state comes from localStorage before the first paint, in try/catch.
+    assert!(page.contains("try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"));
+    let js = get(&base, "/static/app.js").body;
+    assert!(js.contains("try { localStorage.setItem(\"fr-side\""));
+    let css = get(&base, "/static/app.css").body;
+    assert!(css.contains(".side-rail{--side:60px}"));
+    assert!(css.contains(".card.tile{padding:8px 14px 9px;gap:1px}"));
+}

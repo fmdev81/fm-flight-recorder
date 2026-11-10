@@ -60,6 +60,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,su
 .nav svg{width:16px;height:16px;flex:none}
 .theme{flex:none;font:inherit;font-size:12.5px;font-weight:500;min-height:32px;padding:0 10px;border:1px solid var(--ctl);border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer;white-space:nowrap}
 .theme:hover{background:var(--sunk);color:var(--ink)}
+/* Sidebar toggle: only with JS (it starts hidden) and only on wide screens,
+   where the nav is a sidebar. Collapsed = an icon rail (html.side-rail). */
+.sidet{display:none}
 .top{grid-area:top;--g:max(16px,env(safe-area-inset-left,0px));display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:16px var(--g) 14px;background:var(--bg);border-bottom:1px solid var(--line);min-width:0}
 .main{grid-area:main;--g:max(16px,env(safe-area-inset-left,0px));min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:20px var(--g) 32px}
 .wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -73,6 +76,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,su
   .brand{padding:0 4px}
   .nav{flex-direction:column;align-items:stretch;overflow:visible;flex:1}
   .theme{align-self:flex-start}
+  .sidet:not([hidden]){display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--ink2);font:inherit;font-weight:500;cursor:pointer;text-align:left}
+  .sidet:hover{background:var(--sunk);color:var(--ink)}
+  .sidet svg{width:16px;height:16px;flex:none}
+  .side-rail{--side:60px}
+  .side-rail .side{padding:0 8px 16px;align-items:center}
+  .side-rail .brand{padding:0;justify-content:center;width:44px}
+  .side-rail .nav{align-items:center}
+  .side-rail .nav a,.side-rail .sidet{width:40px;justify-content:center;padding:0}
+  .side-rail .brand span,.side-rail .nav a span,.side-rail .sidet span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .side-rail .sidet svg{transform:scaleX(-1)}
+  .side-rail .theme{align-self:center;width:40px;padding:0;font-size:0}
+  .side-rail .theme::before{content:"\25D0";font-size:15px}
 }
 /* Phone: the page scrolls as one (header included), the nav is a second row
    of 7 items (icon above label, 44 px tall), the footer is one line. */

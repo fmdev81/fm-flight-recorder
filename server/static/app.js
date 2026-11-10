@@ -191,6 +191,45 @@
     drawAll();
   }
 
+  // ---------------------------------------------------------------- sidebar
+  // The toggle collapses the sidebar to an icon rail (wide screens only).
+  // The state is in localStorage ("fr-side"); the inline script in base.html
+  // sets the class before the first paint. Without JS the toggle stays hidden
+  // and the sidebar stays open. Shortcut: "[" (not while typing).
+  function sideRail() { return document.documentElement.classList.contains("side-rail"); }
+
+  function showSide() {
+    var b = document.getElementById("side-toggle");
+    if (!b) return;
+    var rail = sideRail();
+    b.hidden = false;
+    b.setAttribute("aria-expanded", rail ? "false" : "true");
+    b.setAttribute("title", (rail ? "Expand" : "Collapse") + " sidebar ([)");
+    b.querySelector("span").textContent = rail ? "Expand" : "Collapse";
+    document.querySelectorAll("#side-nav a").forEach(function (a) {
+      if (rail) a.setAttribute("title", a.textContent.trim());
+      else a.removeAttribute("title");
+    });
+  }
+
+  function setSide(rail) {
+    document.documentElement.classList.toggle("side-rail", rail);
+    try { localStorage.setItem("fr-side", rail ? "rail" : "open"); } catch (e) { /* no storage */ }
+    showSide();
+    // Charts and lanes measure their width.
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "[" || e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
+    var b = document.getElementById("side-toggle");
+    if (!b || b.hidden || !b.offsetParent) return;
+    e.preventDefault();
+    setSide(!sideRail());
+  });
+
   // ---------------------------------------------------------------- tables
   function sortTable(btn) {
     var table = btn.closest("table");
@@ -223,7 +262,9 @@
   document.addEventListener("click", function (e) {
     var t = e.target.closest("button, a");
     if (!t) return;
-    if (t.id === "theme") {
+    if (t.id === "side-toggle") {
+      setSide(!sideRail());
+    } else if (t.id === "theme") {
       setTheme({ dark: "light", light: "auto", auto: "dark" }[theme()] || "dark");
     } else if (t.hasAttribute("data-theme-set")) {
       setTheme(t.getAttribute("data-theme-set"));
@@ -520,6 +561,7 @@
     // The server HTML of the live parts, before the scripts below change it.
     liveSnap();
     showTheme(theme());
+    showSide();
     drawAll();
     stepText();
     initLanes();
