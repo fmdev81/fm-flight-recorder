@@ -5,6 +5,7 @@
 //! - `query`: facts, aggregates, series, flags; `rollup`: daily totals and
 //!   retention; `tz`: the server time zone.
 //! - `web`: the dashboard pages (askama templates, embedded static files).
+//! - `live`: the Server-Sent Events stream that tells open pages about new data.
 //! - `import`: JSONL logs; `fake`: synthetic data.
 
 pub mod api;
@@ -15,6 +16,7 @@ pub mod fake;
 pub mod fmt;
 pub mod import;
 pub mod lanes;
+pub mod live;
 pub mod log;
 pub mod query;
 pub mod rollup;

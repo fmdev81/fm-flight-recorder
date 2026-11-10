@@ -49,6 +49,10 @@
 <div class="rowc"><input id="rec-threshold" form="setup-form" name="rec_threshold_ms" class="inp n" type="number" value="{{ v.s.rec_threshold_ms }}" min="20" step="10"><span class="sub">ms</span></div>
 <label for="rec-port">FileMaker Server port</label>
 <div class="rowc"><input id="rec-port" form="setup-form" name="rec_port" class="inp n" type="number" value="{{ v.s.rec_port }}" min="0" max="65535"></div>
+<label for="rec-send">Send interval</label>
+<div class="rowc"><input id="rec-send" form="setup-form" name="rec_send_ms" class="inp n" type="number" value="{{ v.s.rec_send_ms }}" min="250" max="60000" step="50"><span class="sub">ms · 250 is live, 5000 is the plug-in default</span></div>
+<label for="rec-ping">Ping interval</label>
+<div class="rowc"><input id="rec-ping" form="setup-form" name="rec_ping_s" class="inp n" type="number" value="{{ v.ping_s() }}" min="5" max="600" step="1"><span class="sub">s</span></div>
 </div>
 </section>
 

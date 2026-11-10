@@ -123,6 +123,29 @@ A batch is all or nothing: on a status other than `200` the server stores no eve
 
 The plug-in sends 200 events or 512 KiB in one batch at most, so it stays below the limits.
 
+### When the plug-in sends
+
+Two options of `FlightRecorder_Start` set the timing:
+
+| Option | Default | Range | Meaning |
+|---|---|---|---|
+| `send_ms` | `5000` | 250 to 60000 | A batch goes out at most this long after its first event, or at once at 200 events. |
+| `ping_ms` | `60000` | 5000 to 600000 | The interval of the ping. |
+
+A value out of the range changes to the nearest limit. `FlightRecorder_Status` shows the
+values in use (`send_ms`, `ping_ms`).
+
+The plug-in writes a freeze when the freeze ends and the plug-in has the context after the
+freeze (in less than 1.5 s, usually at once). Then the freeze waits for `send_ms`. For a dashboard
+that is as live as possible, use `send_ms=250`:
+
+```
+FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>; send_ms=250; ping_ms=15000" )
+```
+
+A plug-in before these options ignores them (the result shows `ignored: send_ms, ping_ms`) and
+uses the defaults.
+
 ### Unknown fields and types
 
 - The server ignores fields that it does not know, in the envelope and in the events.
@@ -131,7 +154,7 @@ The plug-in sends 200 events or 512 KiB in one batch at most, so it stays below 
 
 ## POST /api/v1/ping
 
-The plug-in sends a ping about every 60 s while an endpoint is set. A client that has no
+The plug-in sends a ping about every 60 s (`ping_ms`) while an endpoint is set. A client that has no
 freezes sends no events, so the ping tells the server that the client is still connected.
 
 Request:
@@ -218,7 +241,8 @@ These calls are for the dashboard and for scripts. They need no token.
 
 | Method and path | Use |
 |---|---|
-| `GET /api/v1/status` | Listen address, clients and connected clients, last event, server time zone and its UTC offset, versions |
+| `GET /api/v1/status` | Listen address, clients and connected clients, last event, server time zone and its UTC offset, versions, open live streams (`live_streams`) |
+| `GET /api/v1/live` | Server-Sent Events for open pages: `hello` when the stream opens, `events` (data: the number of new events) after each stored batch, `client` when a client connects or goes offline. The stream has no event data. A comment line goes out each 15 s. 64 streams at most, then `503`. |
 | `GET /api/v1/token` | The Event token |
 | `POST /api/v1/token` | Make a new Event token. The old token gets `401` from then on. |
 | `GET /api/v1/flags?range=&file=` | The flagged layouts, clients and plug-in versions |

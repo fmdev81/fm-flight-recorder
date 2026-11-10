@@ -40,7 +40,14 @@
 {% for o in v.options %}<tr><td class="k">{{ o.0 }}</td><td class="mono">{{ o.1 }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 </div>
-<div class="card"><div class="ch"><h2 class="ct">SRTT by hour</h2><span class="sub">ms</span></div>{% call m::hist(v.srtt, "") %}</div>
+<div class="card"><div class="ch"><h2 class="ct">SRTT by hour</h2><span class="sub">median and p95, ms</span></div>
+<p class="sub cap">SRTT is the network round-trip time from this client to FileMaker Server, as macOS measures it on the connection. Values of 0 (no reading) are left out. A high SRTT in a slow hour points to the network; a low one points to the server or the client.</p>
+{% if v.srtt.is_empty() %}<div class="empty">No SRTT readings</div>{% else %}
+<div class="tw"><table class="t srtt">
+<thead><tr><th>Hour</th><th class="w40">SRTT</th><th class="r">Median</th><th class="r">p95</th><th class="r">Freezes</th></tr></thead>
+<tbody>{% for h in v.srtt %}<tr title="{{ h.title }}"><td class="mono">{{ h.hour }}</td><td><div class="rb" role="img" aria-label="{{ h.title }}"><div class="r95" style="width: {{ h.w95 }}"></div><div class="r50" style="width: {{ h.w50 }}"></div></div></td><td class="r mono">{{ h.p50 }}</td><td class="r mono">{{ h.p95 }}</td><td class="r mono">{{ h.n }}</td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+</div>
 </div>
 
 <div class="grid g-2">

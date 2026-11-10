@@ -209,6 +209,8 @@ pub struct Settings {
     pub flag_plugin_min: String,
     pub rec_threshold_ms: u64,
     pub rec_port: u16,
+    pub rec_send_ms: u64,
+    pub rec_ping_ms: u64,
 }
 
 impl Settings {
@@ -227,6 +229,8 @@ impl Settings {
                 .unwrap_or_else(|| d.flag_plugin_min.clone()),
             rec_threshold_ms: num(c, "rec_threshold_ms", d.rec_threshold_ms),
             rec_port: num(c, "rec_port", d.rec_port),
+            rec_send_ms: num(c, "rec_send_ms", d.rec_send_ms),
+            rec_ping_ms: num(c, "rec_ping_ms", d.rec_ping_ms),
         }
     }
 
@@ -238,6 +242,8 @@ impl Settings {
         set_setting(c, "flag_plugin_min", &self.flag_plugin_min)?;
         set_setting(c, "rec_threshold_ms", &self.rec_threshold_ms.to_string())?;
         set_setting(c, "rec_port", &self.rec_port.to_string())?;
+        set_setting(c, "rec_send_ms", &self.rec_send_ms.to_string())?;
+        set_setting(c, "rec_ping_ms", &self.rec_ping_ms.to_string())?;
         Ok(())
     }
 }

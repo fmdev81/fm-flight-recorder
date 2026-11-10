@@ -132,31 +132,31 @@ impl Range {
 
     pub fn label(&self) -> String {
         if self.from == self.to {
-            self.from.format("%a %-d %b %Y").to_string()
+            self.from.format("%a, %b %-d, %Y").to_string()
         } else if self.from.year() == self.to.year() {
             format!(
                 "{} – {}",
-                self.from.format("%-d %b"),
-                self.to.format("%-d %b %Y")
+                self.from.format("%b %-d"),
+                self.to.format("%b %-d, %Y")
             )
         } else {
             format!(
                 "{} – {}",
-                self.from.format("%-d %b %Y"),
-                self.to.format("%-d %b %Y")
+                self.from.format("%b %-d, %Y"),
+                self.to.format("%b %-d, %Y")
             )
         }
     }
 
-    /// Short label for compare lines: "Fri 30 Oct" or "24 Oct – 30 Oct".
+    /// Short label for compare lines: "Fri, Oct 30" or "Oct 24 – Oct 30".
     pub fn short(&self) -> String {
         if self.from == self.to {
-            self.from.format("%a %-d %b").to_string()
+            self.from.format("%a, %b %-d").to_string()
         } else {
             format!(
                 "{} – {}",
-                self.from.format("%-d %b"),
-                self.to.format("%-d %b")
+                self.from.format("%b %-d"),
+                self.to.format("%b %-d")
             )
         }
     }
@@ -606,7 +606,12 @@ pub fn by_hour(facts: &[Fact], z: Zone, r: &Range, now: i64) -> Vec<Bar> {
             );
             Bar {
                 label: z.fmt(h, "%H"),
-                title: format!("{}–{}", z.fmt(h, "%H:%M"), z.fmt(h + HOUR_MS, "%H:%M")),
+                title: format!(
+                    "{}–{} {}",
+                    z.fmt(h, "%H:%M"),
+                    z.fmt(h + HOUR_MS, "%H:%M"),
+                    z.abbr(h)
+                ),
                 n: agg.n,
                 total: agg.total,
                 wait: agg.wait,
@@ -627,11 +632,11 @@ pub fn by_day(facts: &[Fact], r: &Range) -> Vec<Bar> {
             let a = m.remove(&d).unwrap_or_default();
             Bar {
                 label: if r.ndays() > 14 {
-                    d.format("%-d/%-m").to_string()
+                    d.format("%-m/%-d").to_string()
                 } else {
                     d.format("%a %-d").to_string()
                 },
-                title: d.format("%a %-d %b").to_string(),
+                title: d.format("%a, %b %-d").to_string(),
                 n: a.n,
                 total: a.total,
                 wait: a.wait,
@@ -805,6 +810,8 @@ pub struct Footer {
     pub last_event_ts: Option<String>,
     pub tz: String,
     pub tz_offset: String,
+    /// "CST": the zone of every time on the pages.
+    pub tz_abbr: String,
     pub server_version: String,
     pub plugin_version: String,
 }
@@ -826,10 +833,13 @@ pub fn footer(app: &App, db: &Db, now: i64) -> Footer {
         url: app.public_url(),
         clients: cl.len(),
         connected: cl.iter().filter(|c| c.connected).count(),
-        last_event: last.map(|t| app.zone.hms(t)).unwrap_or_else(|| "—".into()),
+        last_event: last
+            .map(|t| app.zone.stamp(t, now))
+            .unwrap_or_else(|| "—".into()),
         last_event_ts: last.map(crate::tz::iso),
         tz: app.zone.name().to_string(),
         tz_offset: app.zone.offset_label(now),
+        tz_abbr: app.zone.abbr(now),
         server_version: VERSION.to_string(),
         plugin_version: plugin,
     }

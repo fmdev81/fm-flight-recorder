@@ -192,9 +192,9 @@ fn every_page_renders_with_synthetic_data() {
                 "Flags",
                 "Who froze, when",
                 "Silent, session open",
-                "Worst layouts",
-                "Worst scripts",
                 "Latest freezes",
+                "newest first",
+                "Times in",
             ],
         ),
         (
@@ -314,7 +314,7 @@ fn every_page_renders_with_synthetic_data() {
         .to_string();
     let r = get(&base, &more);
     assert_eq!(r.status, 200);
-    assert!(r.body.contains("<tr class=\"fr\">") && r.body.contains("fz-count"));
+    assert!(r.body.contains("<tr class=\"fr\" data-id=") && r.body.contains("fz-count"));
     let j = get(&base, "/api/v1/freezes?range=7d");
     assert_eq!(j.status, 200);
     let v: serde_json::Value = serde_json::from_str(&j.body).unwrap();
@@ -362,7 +362,33 @@ fn setup_saves_the_settings_and_makes_a_new_token() {
         );
     }
     let page = text(&get(&base, "/setup").body);
-    assert!(page.contains("threshold=300; port=443"));
+    // A form without the send fields keeps the live defaults.
+    assert!(
+        page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"),
+        "{page}"
+    );
+    let form2 = format!("{form}&rec_send_ms=1000&rec_ping_s=30");
+    let r = request(
+        &base,
+        "POST",
+        "/setup",
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        form2.as_bytes(),
+    );
+    assert_eq!(r.status, 303);
+    let page = text(&get(&base, "/setup").body);
+    assert!(page.contains("port=443; send_ms=1000; ping_ms=30000"));
+    for bad in ["rec_send_ms=100", "rec_ping_s=1"] {
+        let f = format!("{form}&{bad}");
+        let r = request(
+            &base,
+            "POST",
+            "/setup",
+            &[("Content-Type", "application/x-www-form-urlencoded")],
+            f.as_bytes(),
+        );
+        assert_eq!(r.status, 400, "{bad}");
+    }
     let bad = request(
         &base,
         "POST",
@@ -432,4 +458,188 @@ fn fonts_are_in_the_binary_and_the_early_morning_shows_standby() {
         assert!(t.contains(w), "/: {w}");
     }
     assert!(!t.contains("0.00\u{a0}s"), "no divide-by-zero values");
+}
+
+#[test]
+fn pages_mark_their_live_parts_and_work_without_js() {
+    let (app, base, _d) = server("live-parts");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    // Each part that app.js swaps has an id and data-live, on the page
+    // that the browser gets without JS.
+    let want: [(&str, &[&str]); 4] = [
+        ("/", &["ov-flags", "ov-tiles", "ov-latest", "srv"]),
+        ("/freezes", &["fz-list", "srv"]),
+        ("/clients", &["cl-tiles", "cl-table", "srv"]),
+        ("/setup", &["srv"]),
+    ];
+    for (path, ids) in want {
+        let r = get(&base, path);
+        assert_eq!(r.status, 200, "{path}");
+        for id in ids {
+            assert!(
+                r.body.contains(&format!("id=\"{id}\" data-live")),
+                "{path}: no live part {id}"
+            );
+        }
+    }
+    // The lanes and the chart are live parts too.
+    let page = get(&base, "/").body;
+    assert!(
+        page.contains("\" data-live aria-labelledby=")
+            || page.contains("id=\"chart-card\" data-live")
+    );
+    // The page script opens the stream.
+    let js = get(&base, "/static/app.js").body;
+    assert!(js.contains("new EventSource(\"/api/v1/live\")"));
+}
+
+#[test]
+fn sidebar_toggle_is_hidden_without_js_and_compact_tiles_are_styled() {
+    let (_app, base, _d) = server("sidebar");
+    let page = get(&base, "/").body;
+    // The toggle starts hidden: without JS the sidebar stays open.
+    assert!(page.contains("id=\"side-toggle\" aria-controls=\"side-nav\" aria-expanded=\"true\""));
+    assert!(page.contains("title=\"Collapse sidebar ([)\" hidden>"));
+    assert!(page.contains("<nav class=\"nav\" id=\"side-nav\""));
+    // The state comes from localStorage before the first paint, in try/catch.
+    assert!(page.contains(
+        "try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"
+    ));
+    let js = get(&base, "/static/app.js").body;
+    assert!(js.contains("try { localStorage.setItem(\"fr-side\""));
+    let css = get(&base, "/static/app.css").body;
+    assert!(css.contains(".side-rail{--side:60px}"));
+    assert!(css.contains(".card.tile{padding:8px 14px 9px;gap:1px}"));
+}
+
+#[test]
+fn overview_shows_the_newest_freezes_first_and_no_aggregates() {
+    let (app, base, _d) = server("live-first");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    let page = get(&base, "/").body;
+    let t = text(&page);
+    // The aggregates are on the Layouts and Scripts pages only.
+    assert!(!t.contains("Worst layouts") && !t.contains("Worst scripts"));
+    assert!(!page.contains("id=\"ov-worst\""));
+    // "Latest freezes" comes before the timeline.
+    let latest = page.find("id=\"ov-latest\"").expect("latest freezes");
+    let lanes = page.find("Who froze, when").expect("lanes");
+    assert!(latest < lanes, "latest freezes is above the timeline");
+    // Rows carry their id (app.js marks new rows) and a machine time.
+    assert!(page.contains("<tr class=\"fr\" data-id=\""));
+    assert!(page.contains("<time datetime=\"20"));
+    // Newest first: the times of the rows go down.
+    let part = &page[latest..lanes];
+    let times: Vec<&str> = part
+        .split("<time datetime=\"")
+        .skip(1)
+        .map(|x| x.split('"').next().unwrap())
+        .collect();
+    assert!(times.len() > 1);
+    assert!(times.windows(2).all(|w| w[0] >= w[1]), "newest first");
+    // The time format: "Today HH:MM:SS"; the zone is in the footer and the
+    // tooltips.
+    let abbr = app.zone.abbr(fr_server::tz::now_ms());
+    assert!(t.contains("Today "));
+    assert!(page.contains(&format!("Times in <b>{abbr}</b>")));
+    assert!(page.contains(&format!(" {abbr}\"><time datetime=")));
+}
+
+#[test]
+fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
+    let (app, base, _d) = server("zoom");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    let page = get(&base, "/").body;
+    let fig =
+        &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
+    // Hover is enough: a block is a span with a title (no JS) and the data
+    // for the tooltip, not a link to the Freeze page.
+    assert!(fig.contains("<span class=\"fz"));
+    assert!(!fig.contains("<a class=\"fz"));
+    let blocks = fig.split("class=\"lzf\"").next().unwrap();
+    assert!(
+        !blocks.contains("href=\"/freeze?id="),
+        "no block links to a freeze"
+    );
+    for a in [
+        "data-t=",
+        "data-layout=",
+        "data-script=",
+        "data-acct=",
+        "data-srv=",
+        "data-cli=",
+        "data-pct=",
+    ] {
+        assert!(fig.contains(a), "{a}");
+    }
+    // No label on the track that can hide a block.
+    assert!(!fig.contains("class=\"hl"));
+    // The newest freeze is marked, with a line in the header.
+    assert!(fig.contains(" newest\""));
+    assert!(fig.contains("class=\"latest-line\""));
+    // Zoom buttons are links that keep the page query.
+    for z in ["zoom=15m", "zoom=1h", "zoom=4h"] {
+        assert!(fig.contains(z), "{z}");
+    }
+    assert!(fig.contains(">Day</a>"));
+    // Day view: block width grows with duration, not to time scale.
+    assert!(!fig.contains("lanes scaled"));
+    // Last 15 min: to time scale, with a reset link and the window label.
+    let p15 = get(&base, "/?range=today&zoom=15m").body;
+    let f15 = &p15[p15.find("<figure class=\"card lanes").unwrap()..p15.find("</figure>").unwrap()];
+    assert!(f15.contains(" scaled\""));
+    assert!(f15.contains("Reset zoom"));
+    assert!(f15.contains("aria-pressed=\"true\" data-zoom>15 min"));
+    assert!(f15.contains("Positions and widths to time scale"));
+    // The live fragment keeps the zoom.
+    let hx = f15
+        .split("hx-get=\"/fragment/lanes?")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert!(hx.contains("zoom=15m"), "{hx}");
+    // A span from a drag: 10:00 to 10:30, with ticks every few minutes.
+    let ps = get(&base, "/?range=7d&span=600-630").body;
+    assert!(ps.contains("10:00–10:30"));
+    assert!(ps.contains(">10:05</span>") || ps.contains(">10:10</span>"));
+    // A bad span is the day view.
+    assert_eq!(get(&base, "/?span=x-y").status, 200);
+}
+
+#[test]
+fn client_srtt_shows_median_and_p95_per_clock_hour() {
+    let (app, base, _d) = server("srtt");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    let clients = get(&base, "/clients").body;
+    let id = clients
+        .split("href=\"/client?id=")
+        .nth(1)
+        .unwrap()
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .unwrap()
+        .to_string();
+    let page = get(&base, &format!("/client?id={id}&range=7d")).body;
+    let t = text(&page);
+    assert!(t.contains("SRTT by hour"));
+    assert!(t.contains("network round-trip time"));
+    assert!(t.contains("Median") && t.contains("p95"));
+    // A value in ms, on a fixed scale, per clock hour (with the day when it
+    // is not today, so two days do not mix).
+    assert!(page.contains("class=\"rb\""));
+    assert!(page.contains("\u{a0}ms</td>"));
 }

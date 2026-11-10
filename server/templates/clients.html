@@ -6,7 +6,7 @@
 {% include "controls.html" %}
 {% endblock %}
 {% block content %}
-<div class="grid g-tiles">
+<div class="grid g-tiles" id="cl-tiles" data-live>
 {% for t in v.tiles %}
 <div class="card tile"><div class="lbl">{{ t.label }}</div>
 <div class="big">{% if !t.link.is_empty() %}<a href="{{ t.link }}">{{ t.big }}</a>{% else %}{{ t.big }}{% endif %}</div>
@@ -17,7 +17,7 @@
 <div class="card tile"><div class="lbl">Flags</div><div class="big">{{ v.flag_count }}</div><div class="sub chips" style="display: flex; flex-wrap: wrap; gap: 4px 8px">{% for c in v.flag_chips %}<span class="flag">{{ c }}</span>{% endfor %}</div></div>
 </div>
 
-<div class="card">
+<div class="card" id="cl-table" data-live>
 <div class="ch"><h2 class="ct">Clients</h2>{% call m::keys() %}</div>
 {% if v.rows.is_empty() %}<div class="empty">No clients</div>{% else %}
 <div class="tw fade{% if v.rows.len() > 10 %} tall{% endif %}"><table class="t">

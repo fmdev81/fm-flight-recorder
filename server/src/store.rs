@@ -239,6 +239,19 @@ fn client_key(c: &ClientInfo) -> Result<String, StoreError> {
     }
 }
 
+/// `last_seen_ms` of a client, if the server knows it.
+pub fn client_last_seen(db: &Db, c: &ClientInfo) -> Option<i64> {
+    let key = client_key(c).ok()?;
+    db.query_row(
+        "SELECT last_seen_ms FROM clients WHERE install_id = ?1",
+        [key],
+        |r| r.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
 pub fn upsert_client(
     tx: &rusqlite::Transaction,
     c: &ClientInfo,
