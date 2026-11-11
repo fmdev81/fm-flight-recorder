@@ -121,7 +121,11 @@ impl Zone {
 
     /// The full time with the date and zone: "Tue, Nov 10, 2026, 15:54:22 CST".
     pub fn full(&self, ms: i64) -> String {
-        format!("{} {}", self.fmt(ms, "%a, %b %-d, %Y, %H:%M:%S"), self.abbr(ms))
+        format!(
+            "{} {}",
+            self.fmt(ms, "%a, %b %-d, %Y, %H:%M:%S"),
+            self.abbr(ms)
+        )
     }
 
     /// "UTC−06:00" at `ms` (with a real minus sign).

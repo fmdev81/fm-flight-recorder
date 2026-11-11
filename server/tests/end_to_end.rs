@@ -361,7 +361,10 @@ fn setup_saves_the_settings_and_makes_a_new_token() {
     }
     let page = text(&get(&base, "/setup").body);
     // A form without the send fields keeps the live defaults.
-    assert!(page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"), "{page}");
+    assert!(
+        page.contains("threshold=300; port=443; send_ms=250; ping_ms=15000"),
+        "{page}"
+    );
     let form2 = format!("{form}&rec_send_ms=1000&rec_ping_s=30");
     let r = request(
         &base,
@@ -482,7 +485,10 @@ fn pages_mark_their_live_parts_and_work_without_js() {
     }
     // The lanes and the chart are live parts too.
     let page = get(&base, "/").body;
-    assert!(page.contains("\" data-live aria-labelledby=") || page.contains("id=\"chart-card\" data-live"));
+    assert!(
+        page.contains("\" data-live aria-labelledby=")
+            || page.contains("id=\"chart-card\" data-live")
+    );
     // The page script opens the stream.
     let js = get(&base, "/static/app.js").body;
     assert!(js.contains("new EventSource(\"/api/v1/live\")"));
@@ -497,7 +503,9 @@ fn sidebar_toggle_is_hidden_without_js_and_compact_tiles_are_styled() {
     assert!(page.contains("title=\"Collapse sidebar ([)\" hidden>"));
     assert!(page.contains("<nav class=\"nav\" id=\"side-nav\""));
     // The state comes from localStorage before the first paint, in try/catch.
-    assert!(page.contains("try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"));
+    assert!(page.contains(
+        "try{t=localStorage.getItem(\"fr-theme\");s=localStorage.getItem(\"fr-side\")}catch(e){}"
+    ));
     let js = get(&base, "/static/app.js").body;
     assert!(js.contains("try { localStorage.setItem(\"fr-side\""));
     let css = get(&base, "/static/app.css").body;
@@ -538,7 +546,10 @@ fn overview_shows_the_newest_freezes_first_and_no_aggregates() {
     // tooltips.
     let abbr = app.zone.abbr(fr_server::tz::now_ms());
     assert!(t.contains("Today "));
-    assert!(page.contains(&format!(">{abbr}</span></div>")), "the zone in the footer");
+    assert!(
+        page.contains(&format!(">{abbr}</span></div>")),
+        "the zone in the footer"
+    );
     assert!(page.contains(&format!(" {abbr}\"><time datetime=")));
 }
 
@@ -555,35 +566,74 @@ fn overview_is_calm() {
     let latest = page.find("id=\"ov-latest\"").unwrap();
     let part = &page[latest..latest + page[latest..].find("</table>").unwrap()];
     assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th><span class=\"vh\">Server and client split</span></th><th>Layout</th><th>Account</th></tr>"));
-    for gone in ["<th>From</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
+    for gone in [
+        "<th>From</th>",
+        "<th>Client</th>",
+        "<th>Script</th>",
+        "Round trips",
+    ] {
         assert!(!part.contains(gone), "{gone}");
     }
     let rows = part.matches("<tr class=\"fr\"").count();
     assert!(rows > 0 && rows <= 8, "{rows}");
     // Each row has the split bar, with the seconds in its tooltip.
-    assert_eq!(part.matches("<td class=\"c-s\"><div class=\"hb\" role=\"img\"").count(), rows);
-    assert!(part.contains("<div class=\"hs\" style=\"width: ") && part.contains("<div class=\"hc\" style=\"width: "));
-    let tip = part.split("class=\"hb\" role=\"img\" aria-label=\"").nth(1).unwrap().split('"').next().unwrap();
-    assert!(tip.starts_with("Server ") && tip.contains(" · Client "), "{tip}");
+    assert_eq!(
+        part.matches("<td class=\"c-s\"><div class=\"hb\" role=\"img\"")
+            .count(),
+        rows
+    );
+    assert!(
+        part.contains("<div class=\"hs\" style=\"width: ")
+            && part.contains("<div class=\"hc\" style=\"width: ")
+    );
+    let tip = part
+        .split("class=\"hb\" role=\"img\" aria-label=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert!(
+        tip.starts_with("Server ") && tip.contains(" · Client "),
+        "{tip}"
+    );
     // The Freezes page keeps all columns.
     let fz = get(&base, "/freezes").body;
-    for kept in ["<th>From</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
+    for kept in [
+        "<th>From</th>",
+        "<th>Client</th>",
+        "<th>Script</th>",
+        "Round trips",
+    ] {
         assert!(fz.contains(kept), "{kept}");
     }
     // Tiles: one number and at most one short line.
     let tiles = &page[page.find("id=\"ov-tiles\"").unwrap()..];
-    let tiles = &tiles[..tiles.find("</div>\n</div></div>").unwrap_or(tiles.len().min(4000))];
-    for gone in ["script busy", "per freeze", "offline", "accounts", "Server 0", "Client 0"] {
+    let tiles = &tiles[..tiles
+        .find("</div>\n</div></div>")
+        .unwrap_or(tiles.len().min(4000))];
+    for gone in [
+        "script busy",
+        "per freeze",
+        "offline",
+        "accounts",
+        "Server 0",
+        "Client 0",
+    ] {
         assert!(!tiles.contains(gone), "{gone}");
     }
     // The timeline: no newest line, no scale note, no lane totals, no
     // summary sentence in view (it is in Table view).
-    let fig = &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
+    let fig =
+        &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
     assert!(!fig.contains("class=\"latest-line\""));
     assert!(!fig.contains("class=\"lnote\""));
     assert!(!fig.contains("class=\"lnt\""));
     assert!(fig.contains("class=\"tvcap\""));
-    assert!(fig.contains("frozen, "), "lane totals are in the lane tooltip");
+    assert!(
+        fig.contains("frozen, "),
+        "lane totals are in the lane tooltip"
+    );
     // Footer: one short line; versions and the zone name are on Setup.
     let foot = &page[page.find("<footer").unwrap()..page.find("</footer>").unwrap()];
     assert!(!foot.contains("Plug-in") && !foot.contains("FM Flight Recorder server"));
@@ -599,14 +649,26 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     let sessions = fake::generate(&o, app.zone);
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     let page = get(&base, "/").body;
-    let fig = &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
+    let fig =
+        &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
     // Hover is enough: a block is a span with a title (no JS) and the data
     // for the tooltip, not a link to the Freeze page.
     assert!(fig.contains("<span class=\"fz"));
     assert!(!fig.contains("<a class=\"fz"));
     let blocks = fig.split("class=\"lzf\"").next().unwrap();
-    assert!(!blocks.contains("href=\"/freeze?id="), "no block links to a freeze");
-    for a in ["data-t=", "data-layout=", "data-script=", "data-acct=", "data-srv=", "data-cli=", "data-pct="] {
+    assert!(
+        !blocks.contains("href=\"/freeze?id="),
+        "no block links to a freeze"
+    );
+    for a in [
+        "data-t=",
+        "data-layout=",
+        "data-script=",
+        "data-acct=",
+        "data-srv=",
+        "data-cli=",
+        "data-pct=",
+    ] {
         assert!(fig.contains(a), "{a}");
     }
     // No label on the track that can hide a block.
@@ -659,18 +721,31 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     // A range that ends at now, from the navigator: zoom=37.5m.
     let pl = get(&base, "/?range=today&zoom=37.5m").body;
     assert!(pl.contains("data-follow=\"37.5\""));
-    assert!(pl.contains("<span class=\"zspan\">37 min 30 s</span>") || pl.contains("<span class=\"zspan\">38 min</span>"));
+    assert!(
+        pl.contains("<span class=\"zspan\">37 min 30 s</span>")
+            || pl.contains("<span class=\"zspan\">38 min</span>")
+    );
     // A range away from now: the presets keep its center (no jump to now).
     let now_m = {
         let p = get(&base, "/?range=today").body;
         let i = p.find("data-nowm=\"").unwrap() + 11;
         p[i..].split('"').next().unwrap().parse::<f64>().unwrap()
     };
-    let (a, b) = if now_m >= 720.0 { (60.0, 120.0) } else { (1300.0, 1360.0) };
+    let (a, b) = if now_m >= 720.0 {
+        (60.0, 120.0)
+    } else {
+        (1300.0, 1360.0)
+    };
     let pa = get(&base, &format!("/?range=today&span={a}-{b}")).body;
     let c = (a + b) / 2.0;
-    assert!(pa.contains(&format!("span={:.2}-{:.2}", c - 7.5, c + 7.5)), "15 min keeps the center");
-    assert!(pa.contains(&format!("span={:.2}-{:.2}", c - 30.0, c + 30.0)), "1 h keeps the center");
+    assert!(
+        pa.contains(&format!("span={:.2}-{:.2}", c - 7.5, c + 7.5)),
+        "15 min keeps the center"
+    );
+    assert!(
+        pa.contains(&format!("span={:.2}-{:.2}", c - 30.0, c + 30.0)),
+        "1 h keeps the center"
+    );
     assert!(pa.contains("<span class=\"zfol\" hidden>"));
     // A bad span is the day view.
     assert_eq!(get(&base, "/?span=x-y").status, 200);

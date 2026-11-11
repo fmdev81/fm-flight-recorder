@@ -143,7 +143,9 @@ fn send_ms_option_sets_the_batch_interval() {
     let st = rec.status();
     assert_eq!((st.send_ms, st.ping_ms), (250, 5000));
     // session_start goes out alone, about 250 ms after the start.
-    assert!(srv.state.wait_for(Duration::from_secs(3), |s| s.seqs() == [1]));
+    assert!(srv
+        .state
+        .wait_for(Duration::from_secs(3), |s| s.seqs() == [1]));
     // A new event arrives 250 ms (plus the post) after it was written,
     // not 5 s (the default).
     let t0 = Instant::now();

@@ -160,8 +160,8 @@ async fn ping(
     let r = with_db(&app, move |a, db| {
         let now = now_ms();
         // A ping from a client that was offline (or new) changes its status.
-        let back = store::client_last_seen(db, &p.client)
-            .is_none_or(|seen| now - seen > a.connected_ms());
+        let back =
+            store::client_last_seen(db, &p.client).is_none_or(|seen| now - seen > a.connected_ms());
         store::store_ping(db, &p, &ip, now).map(|()| back)
     })
     .await;

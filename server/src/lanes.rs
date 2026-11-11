@@ -531,13 +531,16 @@ fn ticks(lo: f64, hi: f64, playhead: bool, now_m: f64) -> Vec<Tick> {
                 // The REC label is about 150 px wide: up to a quarter of the window.
                 let under_rec = playhead && m > now_m && m - now_m <= (hi - lo) * 0.25;
                 if !near_now {
-                    out.push((win.x(m), Tick {
-                        x: pc(win.x(m)),
-                        label: hm(m, secs),
-                        wide: t % s1 == 0,
-                        narrow: t % s2 == 0,
-                        near: under_rec,
-                    }));
+                    out.push((
+                        win.x(m),
+                        Tick {
+                            x: pc(win.x(m)),
+                            label: hm(m, secs),
+                            wide: t % s1 == 0,
+                            narrow: t % s2 == 0,
+                            near: under_rec,
+                        },
+                    ));
                 }
             }
             t += step;
@@ -719,7 +722,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     out.day_hi = format!("{:.3}", day.1);
     out.ext_lo = format!("{:.3}", ext.0);
     out.ext_hi = format!("{:.3}", ext.1);
-    out.abbr = z.abbr(if has_today { now } else { z.day_start(inp.r.to) });
+    out.abbr = z.abbr(if has_today {
+        now
+    } else {
+        z.day_start(inp.r.to)
+    });
     if has_today {
         out.now_m = format!("{now_m:.4}");
     }
@@ -729,7 +736,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         }
     }
     // A range that follows now is "the last N minutes".
-    out.span_label = span_text(if out.follow > 0.0 { out.follow } else { span_min });
+    out.span_label = span_text(if out.follow > 0.0 {
+        out.follow
+    } else {
+        span_min
+    });
     out.lnote = scale_note(span_min).into();
 
     // The newest freeze of the day gets the "newest" mark, at any zoom.
@@ -765,7 +776,12 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         });
     }
     for r in &mut raws {
-        r.marg = r.evs.iter().filter(|e| in_win(e, mlo, mhi)).cloned().collect();
+        r.marg = r
+            .evs
+            .iter()
+            .filter(|e| in_win(e, mlo, mhi))
+            .cloned()
+            .collect();
         if zwin.is_some() {
             r.evs.retain(|e| in_win(e, lo, hi));
         }
@@ -803,7 +819,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     let key = inp.zoom.key();
     let holds_now = has_today && (zwin.is_none() || (now_m >= lo && now_m <= hi + 0.5));
     let mid = (lo + hi) / 2.0;
-    for (k, label, w) in [("15m", "15 min", 15.0), ("1h", "1 h", 60.0), ("4h", "4 h", 240.0)] {
+    for (k, label, w) in [
+        ("15m", "15 min", 15.0),
+        ("1h", "1 h", 60.0),
+        ("4h", "4 h", 240.0),
+    ] {
         let href = if holds_now {
             link(&format!("zoom={k}"))
         } else {
@@ -1044,10 +1064,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
             );
         }
         (_, None) if zwin.is_some() => {
-            out.caption = format!(
-                "No freezes from {}.",
-                out.zoom_label.replace('–', " to ")
-            );
+            out.caption = format!("No freezes from {}.", out.zoom_label.replace('–', " to "));
         }
         (Mode::Clients, Some(t)) => {
             let nclients = {
@@ -1290,8 +1307,15 @@ mod tests {
     fn zoom_ticks_fit_the_window() {
         // 15 minutes: a label every 2 min (wide), 5 min (narrow).
         let t = ticks(600.0, 615.0, false, 0.0);
-        let wide: Vec<&str> = t.iter().filter(|x| x.wide).map(|x| x.label.as_str()).collect();
-        assert_eq!(wide, ["10:00", "10:02", "10:04", "10:06", "10:08", "10:10", "10:12", "10:14"]);
+        let wide: Vec<&str> = t
+            .iter()
+            .filter(|x| x.wide)
+            .map(|x| x.label.as_str())
+            .collect();
+        assert_eq!(
+            wide,
+            ["10:00", "10:02", "10:04", "10:06", "10:08", "10:10", "10:12", "10:14"]
+        );
         assert!(t.iter().filter(|x| x.narrow).count() <= 5);
         // 2 minutes: seconds in the labels.
         let t = ticks(600.0, 602.0, false, 0.0);
@@ -1352,7 +1376,12 @@ mod tests {
     fn navigator_plot_has_a_bar_per_busy_column() {
         let ext = (480.0, 1080.0);
         // Two freezes in one column, one in another, one out of the window.
-        let evs = [(600.0, 4000u64), (600.5, 12_000), (900.0, 1000), (1200.0, 9000)];
+        let evs = [
+            (600.0, 4000u64),
+            (600.5, 12_000),
+            (900.0, 1000),
+            (1200.0, 9000),
+        ];
         let bars = nav_bars(&evs, ext);
         assert_eq!(bars.len(), 2);
         // The busier column is the full height, the other is lower but at

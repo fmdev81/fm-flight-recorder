@@ -1747,7 +1747,11 @@ pub fn users(ctx: &Ctx, p: &Params) -> Users {
     let mut ctl = ctx.ctl("/users", p, &week);
     ctl.show_range = false;
     ctl.range = "today".into();
-    ctl.date = format!("{} {}", ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"), ctx.z.abbr(ctx.now));
+    ctl.date = format!(
+        "{} {}",
+        ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"),
+        ctx.z.abbr(ctx.now)
+    );
     let file = p.file_opt();
     let f7 = ctx.facts(&week, &Filter::file(&file));
     let names = user_names(&f7);
@@ -2122,7 +2126,11 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
     let mut ctl = ctx.ctl("/clients", p, &week);
     ctl.show_range = false;
     ctl.range = "today".into();
-    ctl.date = format!("{} {}", ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"), ctx.z.abbr(ctx.now));
+    ctl.date = format!(
+        "{} {}",
+        ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"),
+        ctx.z.abbr(ctx.now)
+    );
     let file = p.file_opt();
     let f7 = ctx.facts(&week, &Filter::file(&file));
     let g7: HashMap<i64, Group> = group(&f7, |x| (String::new(), x.client_id.to_string()))
@@ -2547,9 +2555,7 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
         },
         tiles,
         sessions,
-        options_when: latest
-            .map(|s| ctx.when_tz(s.start))
-            .unwrap_or_default(),
+        options_when: latest.map(|s| ctx.when_tz(s.start)).unwrap_or_default(),
         options,
         users: nrows(&users, &ctl, "user", 8, ctx),
         layouts: nrows(&layouts, &ctl, "layout", 8, ctx),
@@ -3193,9 +3199,10 @@ pub fn freeze_detail(ctx: &Ctx, p: &Params) -> FreezeDetail {
             layout
         },
         when: format!(
-            "{} – {}",
+            "{} – {} {}",
             ctx.z.fmt(ts, "%a, %b %-d, %Y · ") + &ms(ts),
-            format!("{} {}", ms(end), ctx.z.abbr(end))
+            ms(end),
+            ctx.z.abbr(end)
         ),
         client: ctx.client_name(cid),
         client_url: ctl.client_url(cid),
