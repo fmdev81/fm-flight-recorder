@@ -581,7 +581,7 @@ fn overview_is_calm() {
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     let page = get(&base, "/").body;
     // Latest freezes: time, duration with the split bar, layout, account;
-    // 8 rows at most.
+    // 25 rows at most.
     let latest = page.find("id=\"ov-latest\"").unwrap();
     let part = &page[latest..latest + page[latest..].find("</table>").unwrap()];
     assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th><span class=\"vh\">Server and client split</span></th><th>Layout</th><th>Script</th><th>Account</th></tr>"));
@@ -589,7 +589,7 @@ fn overview_is_calm() {
         assert!(!part.contains(gone), "{gone}");
     }
     let rows = part.matches("<tr class=\"fr\"").count();
-    assert!(rows > 0 && rows <= 8, "{rows}");
+    assert!(rows > 8 && rows <= 25, "{rows}");
     // Each row has a script cell: the script name, or empty when none ran
     // (never "No script name" or a dash).
     assert_eq!(part.matches("<td class=\"c-sc\">").count(), rows);

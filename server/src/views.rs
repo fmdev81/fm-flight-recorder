@@ -980,7 +980,7 @@ fn none_text(r: &Range) -> &'static str {
 }
 
 /// Rows of "Latest freezes" on the overview.
-pub const OVERVIEW_ROWS: usize = 8;
+pub const OVERVIEW_ROWS: usize = 25;
 
 pub struct Overview {
     pub ctl: Ctl,
