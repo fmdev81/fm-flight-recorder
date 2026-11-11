@@ -23,11 +23,11 @@
 <div class="card latest" id="ov-latest" data-live>
 <div class="ch"><h2 class="ct">Latest freezes</h2><a href="/freezes?{{ v.ctl.qs() }}" class="ca">All {{ v.recent_total }} freezes</a></div>
 {# Short rows: time, duration with the server/client split bar (seconds in
-   its tooltip), layout, the running script (empty when none), account.
+   its tooltip), layout with the running script after it (muted, when there is one), account.
    The Freezes page has all columns. #}
 {% if v.recent.is_empty() %}<div class="empty">{% if v.ctl.range == "today" %}No freezes yet today. The recorder is on standby until a client opens a session.{% else %}No freezes in this range.{% endif %}</div>{% else %}
 <table class="t ft ftshort">
-<thead><tr><th>Time</th><th class="r">Duration</th><th><span class="vh">Server and client split</span></th><th>Layout</th><th>Script</th><th>Account</th></tr></thead>
+<thead><tr><th>Time</th><th class="r">Duration</th><th><span class="vh">Server and client split</span></th><th>Layout</th><th>Account</th></tr></thead>
 <tbody>
 {% for r in v.recent %}{% call m::ftr_short(r) %}{% endfor %}
 </tbody></table>{% endif %}
