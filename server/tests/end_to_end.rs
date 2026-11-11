@@ -136,7 +136,7 @@ fn plugin_recorder_posts_to_the_server_and_pages_show_it() {
     let fz = get(&base, "/freezes");
     assert_eq!(fz.status, 200);
     let t = text(&fz.body);
-    assert!(t.contains("1 of 1 freezes"), "freezes count");
+    assert!(t.contains("1 freeze<"), "freezes count: {t}");
     assert!(t.contains("e2e_user") && t.contains("E2E Mac") && t.contains("Orders | List"));
     let id = count(&app, "SELECT id FROM events WHERE type = 'freeze'");
     let fd = get(&base, &format!("/freeze?id={id}"));
@@ -222,14 +222,20 @@ fn every_page_renders_with_synthetic_data() {
         ),
         (
             "/layouts?range=7d",
-            &["Layouts by total frozen time", "Avg round trips", "<tfoot>"],
+            &[
+                "Filter layouts",
+                "Round trips",
+                "Server share",
+                "data-tk",
+                "<tfoot>",
+            ],
         ),
         (
             "/scripts?range=7d",
             &[
-                "All scripts",
+                "Filter scripts",
                 "Seen in",
-                "Script busy",
+                "Busy time",
                 "No script name",
                 "scripts=0",
             ],
@@ -312,7 +318,11 @@ fn every_page_renders_with_synthetic_data() {
         .to_string();
     let r = get(&base, &more);
     assert_eq!(r.status, 200);
-    assert!(r.body.contains("<tr class=\"fr\" data-id=") && r.body.contains("fz-count"));
+    assert!(
+        r.body.contains("<tr data-href=")
+            && r.body.contains("data-id=")
+            && r.body.contains("fz-table-count")
+    );
     let j = get(&base, "/api/v1/freezes?range=7d");
     assert_eq!(j.status, 200);
     let v: serde_json::Value = serde_json::from_str(&j.body).unwrap();
@@ -467,9 +477,11 @@ fn pages_mark_their_live_parts_and_work_without_js() {
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     // Each part that app.js swaps has an id and data-live, on the page
     // that the browser gets without JS.
-    let want: [(&str, &[&str]); 4] = [
+    let want: [(&str, &[&str]); 6] = [
         ("/", &["ov-flags", "ov-tiles", "ov-latest", "srv"]),
-        ("/freezes", &["fz-list", "srv"]),
+        ("/freezes", &["fz-table", "srv"]),
+        ("/layouts", &["lay-table", "srv"]),
+        ("/scripts", &["scr-table", "srv"]),
         ("/clients", &["cl-tiles", "cl-table", "srv"]),
         ("/setup", &["srv"]),
     ];
@@ -604,9 +616,9 @@ fn overview_is_calm() {
     // The Freezes page keeps all columns.
     let fz = get(&base, "/freezes").body;
     for kept in [
-        "<th>From</th>",
-        "<th>Client</th>",
-        "<th>Script</th>",
+        "data-key=\"from\"",
+        "data-key=\"client\"",
+        "data-key=\"script\"",
         "Round trips",
     ] {
         assert!(fz.contains(kept), "{kept}");
@@ -780,4 +792,100 @@ fn client_srtt_shows_median_and_p95_per_clock_hour() {
     // is not today, so two days do not mix).
     assert!(page.contains("class=\"rb\""));
     assert!(page.contains("\u{a0}ms</td>"));
+}
+
+/// The first-column `data-v` of each body row of the table kit, in page order.
+fn first_cells(body: &str) -> Vec<String> {
+    let tbody = &body[body.find("<tbody").unwrap()..];
+    let tbody = &tbody[..tbody.find("</tbody>").unwrap()];
+    tbody
+        .split("<tr")
+        .skip(1)
+        .map(|r| {
+            r.split("data-v=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn table_pages_keep_sort_and_filter_in_the_url_and_read_without_js() {
+    let (app, base, _d) = server("table-state");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+
+    // Default order: the most frozen time first; the rows are links and the
+    // header is a set of sort links, so the page reads without JS.
+    let def = get(&base, "/scripts?range=7d").body;
+    assert!(def.contains("id=\"scr-table\" data-live data-tk"));
+    assert!(def.contains("aria-sort=\"descending\""));
+    assert!(def.contains("data-href=\"/script?"));
+    let n_all = first_cells(&def).len();
+    assert!(n_all > 3);
+
+    // sort=name&dir=asc: names in order (case does not matter).
+    let by_name = get(&base, "/scripts?range=7d&sort=name&dir=asc").body;
+    let names = first_cells(&by_name);
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+    assert!(by_name.contains("aria-sort=\"ascending\""));
+    // The header link of that column flips the direction and keeps range.
+    assert!(by_name.contains("href=\"/scripts?range=7d&#38;sort=name&#38;dir=desc\""));
+    let desc = first_cells(&get(&base, "/scripts?range=7d&sort=name&dir=desc").body);
+    let mut rev = sorted.clone();
+    rev.reverse();
+    assert_eq!(desc, rev);
+
+    // A number column sorts by number, high to low first.
+    let by_n = get(&base, "/scripts?range=7d&sort=n").body;
+    assert!(by_n.contains("data-sort=\"n\" data-dir=\"desc\""));
+
+    // The filter: rows that match, the count, the box value, and the
+    // other parameters kept in the sort links and the form.
+    let first = names[0].clone();
+    let q = first.replace(' ', "%20").replace(':', "%3A");
+    let f = get(&base, &format!("/scripts?range=7d&sort=name&dir=asc&q={q}")).body;
+    let rows = first_cells(&f);
+    assert!(rows.contains(&first) && rows.len() <= n_all);
+    assert!(f.contains(&format!("value=\"{first}\"")));
+    assert!(f.contains("name=\"range\" value=\"7d\""));
+    let none = get(&base, "/scripts?range=7d&q=zzzzqqq").body;
+    assert!(none.contains("0 of ") && none.contains("match"));
+    assert!(first_cells(&none).is_empty());
+
+    // An unknown sort column falls back to the default order.
+    let bad = get(&base, "/scripts?range=7d&sort=nope&dir=asc").body;
+    assert_eq!(first_cells(&bad), first_cells(&def));
+
+    // Layouts: the same kit.
+    let l = get(&base, "/layouts?range=7d&sort=name&dir=asc").body;
+    let ln = first_cells(&l);
+    let mut lsorted = ln.clone();
+    lsorted.sort();
+    assert_eq!(ln, lsorted);
+    assert!(l.contains("id=\"lay-table\" data-live data-tk"));
+
+    // Freezes: the default is the newest 100; a sort or a filter reads all
+    // rows, so the first row is the longest freeze and nothing is "more".
+    let newest = get(&base, "/freezes?range=7d").body;
+    assert_eq!(first_cells(&newest).len(), 100);
+    assert!(newest.contains("Load more"));
+    let longest = get(&base, "/freezes?range=7d&sort=dur&dir=desc").body;
+    let rows = first_cells(&longest);
+    assert!(rows.len() > 100);
+    assert!(!longest.contains("Load more"));
+    let j: serde_json::Value =
+        serde_json::from_str(&get(&base, "/api/v1/freezes?range=7d").body).unwrap();
+    assert!(j["total"].as_u64().unwrap() as usize >= rows.len());
+    let account = get(&base, "/freezes?range=7d&q=arivera").body;
+    assert!(first_cells(&account).len() < rows.len());
+    assert!(account.contains("arivera"));
 }
