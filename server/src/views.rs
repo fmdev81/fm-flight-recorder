@@ -430,6 +430,8 @@ pub struct FRow {
     pub cli_w: String,
     pub split_title: String,
     pub marks: String,
+    /// The freeze still lasts (a `freeze_progress` row): it grows live.
+    pub ongoing: bool,
     /// The time with the zone, for the tooltip.
     #[serde(skip)]
     pub t_tz: String,
@@ -641,7 +643,7 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
     }
     let sql = format!(
         "SELECT id, ts_ms, file, layout, from_layout, script, account, user, client_id,
-                duration_ms, wait_ms, round_trips, type, level, marks, label
+                duration_ms, wait_ms, round_trips, type, level, marks, label, open
          FROM events WHERE {} ORDER BY ts_ms DESC, id DESC LIMIT {}",
         cols.join(" AND "),
         q.limit.max(1)
@@ -666,6 +668,7 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
                 r.get::<_, String>(13)?,
                 r.get::<_, String>(14)?,
                 r.get::<_, String>(15)?,
+                r.get::<_, i64>(16)? != 0,
             ))
         });
         if let Ok(rows) = rows {
@@ -686,6 +689,7 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
                 level,
                 marks,
                 label,
+                ongoing,
             ) in rows.flatten()
             {
                 let d = d.max(0) as u64;
@@ -743,6 +747,7 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
                     cli_w: String::new(),
                     split_title: String::new(),
                     marks: marks.join(" · "),
+                    ongoing,
                     ts_ms: ts,
                     dur_ms: d,
                     wait_ms: wt,
@@ -2601,7 +2606,11 @@ pub fn freeze_row(r: &FRow, o: FzCols) -> Row {
             .mono()
             .sort(r.ts_ms as f64)
             .title(r.t_tz.clone()),
-        Cell::num(r.dur.clone(), r.dur_ms as f64),
+        if r.ongoing {
+            Cell::num(r.dur.clone(), r.dur_ms as f64).chip("ongoing")
+        } else {
+            Cell::num(r.dur.clone(), r.dur_ms as f64)
+        },
         Cell::split(
             Split {
                 s: r.srv_w.clone(),
@@ -2647,7 +2656,9 @@ pub fn freeze_row(r: &FRow, o: FzCols) -> Row {
         };
         Cell::num(r.pct.clone(), v)
     });
-    Row::new(c, r.url.clone()).id(r.id.to_string())
+    Row::new(c, r.url.clone())
+        .id(r.id.to_string())
+        .ongoing(r.ongoing)
 }
 
 /// The events of a detail page as a kit table (sorted and filtered in the

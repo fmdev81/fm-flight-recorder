@@ -26,7 +26,7 @@ use crate::query::{Fact, Kind, Range, RangeKind};
 use crate::tz::{Zone, DAY_MS};
 use crate::views::{Ctx, SessRow};
 use chrono::NaiveDate;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Lanes shown before "+ N more clients".
 pub const MAX_LANES: usize = 12;
@@ -205,6 +205,8 @@ pub struct Block {
     pub hit: bool,
     /// The newest freeze of the graph.
     pub newest: bool,
+    /// A freeze that still lasts (it grows with each update).
+    pub ongoing: bool,
     /// The share of server wait: "65%".
     pub pct: String,
     pub aria: String,
@@ -550,6 +552,17 @@ fn ticks(lo: f64, hi: f64, playhead: bool, now_m: f64) -> Vec<Tick> {
     out.into_iter().map(|(_, t)| t).collect()
 }
 
+/// Ids of the freezes that still last (open `freeze_progress` rows).
+fn open_ids(db: &crate::db::Db) -> HashSet<i64> {
+    let mut out = HashSet::new();
+    if let Ok(mut q) = db.prepare("SELECT id FROM events WHERE open = 1") {
+        if let Ok(rows) = q.query_map([], |r| r.get::<_, i64>(0)) {
+            out.extend(rows.flatten());
+        }
+    }
+    out
+}
+
 pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     let z = ctx.z;
     let now = ctx.now;
@@ -569,6 +582,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     // All events of the range: the lanes, their order and the day window
     // do not change with the zoom.
     let evs = events(inp.facts);
+    let open = open_ids(ctx.db);
     let mut out = Lanes {
         id: inp.id.into(),
         title: inp.title.into(),
@@ -939,6 +953,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
                     swc,
                     hit: Some(e.id) == longest,
                     newest: Some(e.id) == newest,
+                    ongoing: open.contains(&e.id),
                     pct: pct(share),
                     aria: format!(
                         "{when}, {client}, {}, {}, {}, {} server wait",
@@ -1005,6 +1020,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
                     swc,
                     hit: v.iter().any(|e| Some(e.id) == longest),
                     newest: v.iter().any(|e| Some(e.id) == newest),
+                    ongoing: v.iter().any(|e| open.contains(&e.id)),
                     pct: pct(share),
                     aria: if label.is_empty() {
                         format!(
@@ -1210,6 +1226,7 @@ pub fn strip(ctx: &Ctx, client: i64, at: i64, id: i64, facts: &[Fact]) -> Lanes 
             swc: format!("{:.1}%", share * 100.0),
             hit: e.id == id,
             newest: false,
+            ongoing: false,
             pct: pct(share),
             aria: format!(
                 "{}, {}, {}, {}, {} server wait{}",

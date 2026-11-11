@@ -83,9 +83,10 @@ pub fn parse_ping(body: &[u8]) -> Result<Ping, StoreError> {
     Ok(p)
 }
 
-const KNOWN: [&str; 5] = [
+const KNOWN: [&str; 6] = [
     "session_start",
     "freeze",
+    "freeze_progress",
     "script_busy",
     "mark",
     "session_stop",
@@ -114,6 +115,9 @@ pub struct Row {
     pub after: Option<Context>,
     pub raw: String,
     pub event: Option<Event>,
+    /// `freeze_progress`: the freeze id (from 1) and the parts so far.
+    pub freeze_id: u64,
+    pub parts: u32,
 }
 
 fn pick(a: &str, b: &str) -> String {
@@ -160,7 +164,13 @@ pub fn to_row(i: usize, v: &Value, session_id: &str, fallback_ms: i64) -> Result
         Event::SessionStart { ts: t, .. }
         | Event::SessionStop { ts: t, .. }
         | Event::Mark { ts: t, .. } => row.ts_ms = ts(t)?,
-        Event::Freeze { ts: t, end_ts, .. } | Event::ScriptBusy { ts: t, end_ts, .. } => {
+        Event::Freeze { ts: t, end_ts, .. }
+        | Event::ScriptBusy { ts: t, end_ts, .. }
+        | Event::FreezeProgress {
+            ts: t,
+            now_ts: end_ts,
+            ..
+        } => {
             row.ts_ms = ts(t)?;
             row.end_ms = Some(ts(end_ts)?);
         }
@@ -202,6 +212,30 @@ pub fn to_row(i: usize, v: &Value, session_id: &str, fallback_ms: i64) -> Result
         } => {
             row.duration_ms = *duration_ms;
             row.net = *net;
+            row.file = before.file.clone();
+            row.layout = before.layout.clone();
+            row.layout_table = before.layout_table.clone();
+            row.from_layout = before.layout.clone();
+            row.script = before.script.clone();
+            row.account = before.account.clone();
+            row.user = before.user.clone();
+            row.before = Some(before.clone());
+        }
+        Event::FreezeProgress {
+            id,
+            duration_ms,
+            level,
+            before,
+            parts,
+            ..
+        } => {
+            if *id == 0 {
+                return Err(bad("id must be a number from 1"));
+            }
+            row.freeze_id = *id;
+            row.parts = *parts;
+            row.duration_ms = *duration_ms;
+            row.level = level.clone();
             row.file = before.file.clone();
             row.layout = before.layout.clone();
             row.layout_table = before.layout_table.clone();
@@ -321,6 +355,28 @@ pub fn store_batch(db: &mut Db, b: &Batch, m: Meta) -> Result<IngestReply, Store
                ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
         )?;
         for r in &rows {
+            // A long freeze: one row that grows, then the final replaces it.
+            let open = match r.kind.as_str() {
+                "freeze_progress" => Some(if progress(&tx, &b.session_id, client_id, r)? {
+                    Open::Done
+                } else {
+                    Open::Duplicate
+                }),
+                "freeze" => replace_open(&tx, &b.session_id, r)?,
+                _ => None,
+            };
+            match open {
+                Some(Open::Done) => {
+                    reply.accepted += 1;
+                    mark_dirty(&tx, &m, r.ts_ms)?;
+                    continue;
+                }
+                Some(Open::Duplicate) => {
+                    reply.duplicates += 1;
+                    continue;
+                }
+                None => {}
+            }
             let n = &r.net;
             let added = ins.execute(params![
                 b.session_id,
@@ -365,18 +421,198 @@ pub fn store_batch(db: &mut Db, b: &Batch, m: Meta) -> Result<IngestReply, Store
             reply.accepted += 1;
             apply_to_session(&tx, &b.session_id, r)?;
             if r.kind == "freeze" || r.kind == "script_busy" {
-                let day = m.zone.date_of(r.ts_ms);
-                if day >= m.cutoff_day {
-                    tx.execute(
-                        "INSERT OR IGNORE INTO rollup_dirty(day) VALUES (?1)",
-                        [day.to_string()],
-                    )?;
-                }
+                mark_dirty(&tx, &m, r.ts_ms)?;
             }
         }
     }
     tx.commit()?;
     Ok(reply)
+}
+
+/// The day of `ts_ms` needs a new rollup (if it is in the event retention).
+fn mark_dirty(tx: &rusqlite::Transaction, m: &Meta, ts_ms: i64) -> Result<(), StoreError> {
+    let day = m.zone.date_of(ts_ms);
+    if day >= m.cutoff_day {
+        tx.execute(
+            "INSERT OR IGNORE INTO rollup_dirty(day) VALUES (?1)",
+            [day.to_string()],
+        )?;
+    }
+    Ok(())
+}
+
+enum Open {
+    /// The open freeze row changed.
+    Done,
+    /// Nothing changed (a resend, or the freeze is closed already).
+    Duplicate,
+}
+
+/// `freeze_progress`: make the open row of the freeze, or let it grow. A
+/// closed freeze (final event stored, or closed by the server) stays as it
+/// is. The open row counts once in the session (freezes + 1).
+fn progress(
+    tx: &rusqlite::Transaction,
+    session_id: &str,
+    client_id: i64,
+    r: &Row,
+) -> Result<bool, StoreError> {
+    let id = r.freeze_id as i64;
+    let d = r.duration_ms as i64;
+    let found: Option<(i64, i64)> = tx
+        .query_row(
+            "SELECT open, duration_ms FROM events WHERE session_id = ?1 AND freeze_id = ?2",
+            params![session_id, id],
+            |x| Ok((x.get(0)?, x.get(1)?)),
+        )
+        .optional()?;
+    match found {
+        None => {
+            // The final freeze can be here already (an old log read again).
+            let done = tx
+                .query_row(
+                    "SELECT 1 FROM events WHERE session_id = ?1 AND type = 'freeze'
+                       AND ts_ms = ?2 AND seq > 0",
+                    params![session_id, r.ts_ms],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if done {
+                return Ok(false);
+            }
+            tx.execute(
+                "INSERT INTO events(session_id, seq, client_id, type, ts_ms, end_ms, duration_ms,
+                   level, file, layout, layout_table, from_layout, script, account, user,
+                   before_json, raw, freeze_id, open, parts)
+                 VALUES (?1, ?2, ?3, 'freeze', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                   ?15, ?16, ?17, 1, ?18)",
+                params![
+                    session_id,
+                    -id,
+                    client_id,
+                    r.ts_ms,
+                    r.end_ms,
+                    d,
+                    r.level,
+                    r.file,
+                    r.layout,
+                    r.layout_table,
+                    r.from_layout,
+                    r.script,
+                    r.account,
+                    r.user,
+                    r.before
+                        .as_ref()
+                        .map(|c| serde_json::to_string(c).unwrap())
+                        .unwrap_or_else(|| "{}".into()),
+                    r.raw,
+                    id,
+                    r.parts as i64,
+                ],
+            )?;
+            tx.execute(
+                "UPDATE sessions SET freezes = freezes + 1, frozen_ms = frozen_ms + ?2
+                 WHERE session_id = ?1",
+                params![session_id, d],
+            )?;
+            Ok(true)
+        }
+        Some((1, old)) if d > old => {
+            tx.execute(
+                "UPDATE events SET duration_ms = ?3, end_ms = ?4, parts = ?5, raw = ?6
+                 WHERE session_id = ?1 AND freeze_id = ?2",
+                params![session_id, id, d, r.end_ms, r.parts as i64, r.raw],
+            )?;
+            tx.execute(
+                "UPDATE sessions SET frozen_ms = frozen_ms + ?2 WHERE session_id = ?1",
+                params![session_id, d - old],
+            )?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// A final `freeze`: if progress events made a row for it (same session,
+/// same start), the final replaces that row (real seq, open = 0). None: no
+/// such row, store it as usual.
+fn replace_open(
+    tx: &rusqlite::Transaction,
+    session_id: &str,
+    r: &Row,
+) -> Result<Option<Open>, StoreError> {
+    let found: Option<(i64, i64, i64)> = tx
+        .query_row(
+            "SELECT id, seq, duration_ms FROM events
+             WHERE session_id = ?1 AND freeze_id > 0 AND type = 'freeze' AND ts_ms = ?2",
+            params![session_id, r.ts_ms],
+            |x| Ok((x.get(0)?, x.get(1)?, x.get(2)?)),
+        )
+        .optional()?;
+    let Some((id, seq, old)) = found else {
+        return Ok(None);
+    };
+    if seq > 0 {
+        return Ok(Some(Open::Duplicate));
+    }
+    let taken = tx
+        .query_row(
+            "SELECT 1 FROM events WHERE session_id = ?1 AND seq = ?2",
+            params![session_id, r.seq as i64],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if taken {
+        return Ok(Some(Open::Duplicate));
+    }
+    let n = &r.net;
+    tx.execute(
+        "UPDATE events SET seq = ?2, open = 0, end_ms = ?3, duration_ms = ?4, wait_ms = ?5,
+           round_trips = ?6, srtt_ms = ?7, tx_bytes = ?8, rx_bytes = ?9, tx_packets = ?10,
+           rx_packets = ?11, connected = ?12, level = ?13, file = ?14, layout = ?15,
+           layout_table = ?16, from_layout = ?17, script = ?18, account = ?19, user = ?20,
+           marks = ?21, before_json = ?22, after_json = ?23, raw = ?24
+         WHERE id = ?1",
+        params![
+            id,
+            r.seq as i64,
+            r.end_ms,
+            r.duration_ms as i64,
+            n.wait_ms as i64,
+            n.round_trips as i64,
+            n.srtt_ms as i64,
+            n.tx_bytes as i64,
+            n.rx_bytes as i64,
+            n.tx_packets as i64,
+            n.rx_packets as i64,
+            n.connected,
+            r.level,
+            r.file,
+            r.layout,
+            r.layout_table,
+            r.from_layout,
+            r.script,
+            r.account,
+            r.user,
+            serde_json::to_string(&r.marks).unwrap(),
+            r.before
+                .as_ref()
+                .map(|c| serde_json::to_string(c).unwrap())
+                .unwrap_or_else(|| "{}".into()),
+            r.after
+                .as_ref()
+                .map(|c| serde_json::to_string(c).unwrap())
+                .unwrap_or_default(),
+            r.raw,
+        ],
+    )?;
+    tx.execute(
+        "UPDATE sessions SET frozen_ms = frozen_ms + ?2 WHERE session_id = ?1",
+        params![session_id, r.duration_ms as i64 - old],
+    )?;
+    Ok(Some(Open::Done))
 }
 
 /// A new event changes its session: start, stop and freeze counts.
@@ -437,6 +673,11 @@ fn apply_to_session(
                     *heartbeats as i64,
                     *idle_messages as i64
                 ],
+            )?;
+            // The session ended: an open freeze stays at its last update.
+            tx.execute(
+                "UPDATE events SET open = 0 WHERE session_id = ?1 AND open = 1",
+                [session_id],
             )?;
         }
         Some(Event::Freeze { duration_ms, .. }) => {

@@ -56,6 +56,25 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         marks: Vec<String>,
     },
+    /// A freeze that still lasts. The plug-in sends one about once a second
+    /// while a long freeze lasts. `ts` is the start of the freeze. The final
+    /// `freeze` event of the same session has the same `ts` (the same text)
+    /// and replaces it. A server that does not know this type keeps it as
+    /// an unknown event.
+    FreezeProgress {
+        ts: String,
+        /// The time of this update.
+        now_ts: String,
+        /// Number of the freeze in the session: 1, 2, ...
+        id: u64,
+        /// From `ts` to `now_ts`.
+        duration_ms: u64,
+        level: String,
+        before: Context,
+        /// Parts joined so far. FileMaker ran the run loop for a moment
+        /// between them, but did not sleep.
+        parts: u32,
+    },
     /// FileMaker reported "script running" continuously for `duration_ms`.
     ScriptBusy {
         ts: String,

@@ -15,7 +15,7 @@
 <div class="base"></div>
 {% for s in l.sess %}<div class="ss" title="{{ s.title }}" style="left: {{ s.x }}; width: {{ s.w }}" data-a="{{ s.a }}" data-b="{{ s.b }}"></div>{% endfor %}
 {% if !l.now_x.is_empty() %}<div class="nowl" style="left: {{ l.now_x }}" aria-hidden="true"></div>{% endif %}
-{% for b in l.blocks %}<span class="fz{% if b.hit %} hit{% endif %}{% if b.newest %} newest{% endif %}" role="img" style="left: {{ b.x }}; width: {{ b.wc }}" tabindex="{% if loop.first %}0{% else %}-1{% endif %}" aria-label="{{ b.aria }}" title="{{ b.aria }}" data-id="{{ b.id }}" data-t="{{ b.t }}" data-d="{{ b.d }}" data-from="{{ b.from }}" data-layout="{{ b.layout }}" data-acct="{{ b.acct }}" data-script="{{ b.script }}" data-client="{{ b.client }}" data-srv="{{ b.srv }}" data-cli="{{ b.cli }}" data-pct="{{ b.pct }}" data-bin="{{ b.bin }}" data-m="{{ b.m }}" data-dm="{{ b.dm }}" data-gw="{{ b.w }}"><span class="s" style="width: {{ b.swc }}"></span><span class="c"></span></span>{% endfor %}
+{% for b in l.blocks %}<span class="fz{% if b.hit %} hit{% endif %}{% if b.newest %} newest{% endif %}{% if b.ongoing %} ongoing{% endif %}" role="img" style="left: {{ b.x }}; width: {{ b.wc }}" tabindex="{% if loop.first %}0{% else %}-1{% endif %}" aria-label="{{ b.aria }}" title="{{ b.aria }}" data-id="{{ b.id }}" data-t="{{ b.t }}" data-d="{{ b.d }}" data-from="{{ b.from }}" data-layout="{{ b.layout }}" data-acct="{{ b.acct }}" data-script="{{ b.script }}" data-client="{{ b.client }}" data-srv="{{ b.srv }}" data-cli="{{ b.cli }}" data-pct="{{ b.pct }}" data-bin="{{ b.bin }}" data-m="{{ b.m }}" data-dm="{{ b.dm }}" data-gw="{{ b.w }}"><span class="s" style="width: {{ b.swc }}"></span><span class="c"></span></span>{% endfor %}
 </div>
 </div>
 {% endfor %}

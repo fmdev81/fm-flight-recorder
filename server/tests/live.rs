@@ -169,3 +169,32 @@ fn too_many_streams_get_503() {
     assert!(head.starts_with("HTTP/1.1 503"), "{head}");
     drop(open);
 }
+
+#[test]
+fn each_progress_of_a_long_freeze_reaches_open_pages() {
+    let (app, base, _d) = server("live-progress");
+    let (st, _) = Stream::open(&base);
+    assert_eq!(st.next(Duration::from_secs(2)).unwrap().0, "hello");
+    wait_streams(&app, 1);
+    let sid = "6e55105e55105e55105e55105e551056";
+    let body = |seq: u64, ms: u64| {
+        serde_json::json!({"v": 1, "session_id": sid,
+            "client": {"install_id": "00112233445566778899aabbccddeeff", "name": "Mac"},
+            "events": [{"v": 1, "session_id": sid, "seq": seq, "type": "freeze_progress",
+                "ts": "2026-11-11T22:35:29.748Z", "now_ts": "2026-11-11T22:35:31.000Z",
+                "id": 1, "duration_ms": ms, "level": "unsafe", "before": {}, "parts": 1}]})
+        .to_string()
+    };
+    for (seq, ms) in [(2, 1000), (3, 2000)] {
+        let r = post_json(&base, "/api/v1/events", Some(&app.token()), &body(seq, ms));
+        assert_eq!(r.status, 200, "{}", r.body);
+        assert_eq!(
+            st.next(Duration::from_secs(2)).unwrap(),
+            ("events".into(), "1".into())
+        );
+    }
+    // The same update again: nothing grew, the pages hear nothing.
+    let r = post_json(&base, "/api/v1/events", Some(&app.token()), &body(3, 2000));
+    assert_eq!(r.status, 200);
+    assert!(st.next(Duration::from_millis(300)).is_none());
+}

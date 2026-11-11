@@ -194,6 +194,8 @@ pub struct Row {
     pub flagged: bool,
     /// For `data-id` (live updates mark new rows by it).
     pub id: String,
+    /// A freeze that still lasts: the row pulses.
+    pub ongoing: bool,
 }
 
 impl Row {
@@ -221,6 +223,12 @@ impl Row {
         self.flagged = f;
         self
     }
+    /// Mark the row as a freeze that still lasts.
+    pub fn ongoing(mut self, on: bool) -> Row {
+        self.ongoing = on;
+        self
+    }
+
     pub fn id(mut self, id: impl Into<String>) -> Row {
         self.id = id.into();
         self

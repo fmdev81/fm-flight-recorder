@@ -129,6 +129,17 @@ const MIGRATIONS: &[&str] = &[
         day TEXT PRIMARY KEY
     );
     "#,
+    // 2: a long freeze that still lasts. The plug-in sends `freeze_progress`
+    // events; the server keeps one row for the freeze, open = 1, with
+    // seq = -freeze_id (a plug-in seq is never below 1). The final `freeze`
+    // event (same session, same ts) replaces it: real seq, open = 0.
+    r#"
+    ALTER TABLE events ADD COLUMN freeze_id INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE events ADD COLUMN open      INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE events ADD COLUMN parts     INTEGER NOT NULL DEFAULT 0;
+    CREATE UNIQUE INDEX idx_events_freeze ON events(session_id, freeze_id) WHERE freeze_id > 0;
+    CREATE INDEX idx_events_open ON events(open) WHERE open = 1;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
