@@ -424,8 +424,6 @@ tr.fr.arrive td{animation:rowin 8s ease-out}
 /* Table kit (src/table.rs, templates/tk.html). The page header stays at the
    top (it is outside the scroll area); the table scrolls in its own box with a
    sticky header row and a sticky first column. */
-.sortb{font:inherit;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
-.sortb[aria-pressed="true"]{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 .tkpage .wrap{height:100%;max-width:none}
 .card.tk{display:flex;flex-direction:column;flex:1;min-height:0;padding:0;overflow:hidden}
 .tkbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 16px;border-bottom:1px solid var(--line)}
@@ -469,3 +467,8 @@ tr.fr.arrive td{animation:rowin 8s ease-out}
   .tkw{max-height:calc(100dvh - 250px);min-height:200px}
   .tkf{width:100%}
 }
+
+.t.plain th{text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:12.5px;font-weight:500}
+.t.plain td.r{font-family:var(--mono)}
+.card.tk.inline{flex:none}
+.card.tk.inline .tkw{flex:none;max-height:min(460px,60dvh)}

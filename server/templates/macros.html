@@ -23,6 +23,18 @@
 </div>
 {% endmacro %}
 
+{# The summary of a detail page: one row for each metric (not stat cards). #}
+{% macro metrics(ts) %}
+<div class="card"><div class="tw"><table class="t plain">
+<thead><tr><th>Metric</th><th class="r">Value</th><th>Detail</th><th>Compare</th></tr></thead>
+<tbody>
+{% for t in ts %}<tr><td>{{ t.label }}</td>
+<td class="r">{% if !t.link.is_empty() %}<a href="{{ t.link }}">{{ t.big }}</a>{% else %}{{ t.big }}{% endif %}{% if !t.small.is_empty() %} <span class="muted">{{ t.small }}</span>{% endif %}</td>
+<td>{% if let Some(sp) = t.split %}{% call split(sp) %}{% endif %}{{ t.sub }}{% if !t.chip.is_empty() %} <span class="flag">{{ t.chip }}</span>{% endif %}</td>
+<td class="muted">{{ t.cmp }}</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endmacro %}
+
 {% macro chart(title, c) %}
 <div class="card" id="chart-card" data-live>
 <div class="ch"><h2 class="ct">{{ title }}</h2>{% call keys() %}</div>

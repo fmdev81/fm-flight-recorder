@@ -63,6 +63,10 @@ pub struct Cell {
     /// A flag chip that replaces the text (for example `p95 12 s`).
     pub flag: String,
     pub title: String,
+    /// A status dot before the text: `"ok"` or `"off"`.
+    pub dot: &'static str,
+    /// A flag chip after the text (for example `silent 20 min`).
+    pub chip: String,
 }
 
 impl Cell {
@@ -129,6 +133,14 @@ impl Cell {
     }
     pub fn flag(mut self, s: impl Into<String>) -> Cell {
         self.flag = s.into();
+        self
+    }
+    pub fn dot(mut self, d: &'static str) -> Cell {
+        self.dot = d;
+        self
+    }
+    pub fn chip(mut self, s: impl Into<String>) -> Cell {
+        self.chip = s.into();
         self
     }
     pub fn title(mut self, s: impl Into<String>) -> Cell {
@@ -244,6 +256,8 @@ pub struct Table {
     /// A segmented control in the toolbar: (url, label, pressed).
     pub seg: Vec<(String, String, bool)>,
     pub path: String,
+    /// A table in the middle of a detail page: its box has a height limit.
+    pub inline: bool,
     /// The URL of the next rows (Load more), when the page loads in parts.
     pub more: String,
     /// Rows shown and rows in all, when the page loads the rows in parts.

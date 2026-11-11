@@ -1677,31 +1677,9 @@ pub fn script_detail(ctx: &Ctx, p: &Params) -> ScriptDetail {
 
 // ---------------------------------------------------------------- users
 
-pub struct URow {
-    pub account: String,
-    pub url: String,
-    pub user: String,
-    pub clients: String,
-    pub client_url: String,
-    pub seen: String,
-    pub n: String,
-    pub n_v: u64,
-    pub total: String,
-    pub total_v: u64,
-    pub split: Split,
-    pub pct: String,
-    pub pct_v: u64,
-    pub n7: String,
-    pub total7: String,
-    pub worst: String,
-    pub worst_url: String,
-}
-
 pub struct Users {
     pub ctl: Ctl,
-    pub tiles: Vec<Tile>,
-    pub rows: Vec<URow>,
-    pub foot: URow,
+    pub table: Table,
 }
 
 /// The newest non-empty user name of each account.
@@ -1719,169 +1697,144 @@ fn user_names(f: &[Fact]) -> HashMap<String, String> {
 }
 
 pub fn users(ctx: &Ctx, p: &Params) -> Users {
-    let today = Range::today(ctx.z, ctx.now);
-    let week = Range::week(ctx.z, ctx.now);
-    let mut ctl = ctx.ctl("/users", p, &week);
-    ctl.show_range = false;
-    ctl.range = "today".into();
-    ctl.date = format!(
-        "{} {}",
-        ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"),
-        ctx.z.abbr(ctx.now)
-    );
+    let r = p.range(ctx.z, ctx.now);
+    let ctl = ctx.ctl("/users", p, &r);
     let file = p.file_opt();
-    let f7 = ctx.facts(&week, &Filter::file(&file));
-    let names = user_names(&f7);
-    let g7 = group(&f7, |x| (String::new(), x.account.clone()));
-    let ft: Vec<Fact> = f7
-        .iter()
-        .filter(|x| x.ts_ms >= today.start_ms)
-        .cloned()
-        .collect();
-    let gt: HashMap<String, Group> = group(&ft, |x| (String::new(), x.account.clone()))
-        .into_iter()
-        .map(|g| (g.name.clone(), g))
-        .collect();
-    let max = gt.values().map(|g| g.freeze.total).max().unwrap_or(0);
-    let empty = Group::default();
-    let mut rows: Vec<URow> = g7
-        .iter()
-        .map(|g| {
-            let t = gt.get(&g.name).unwrap_or(&empty);
-            let cl: Vec<i64> = g.clients.iter().copied().collect();
-            let cname = match cl.len() {
-                0 => "—".to_string(),
-                1 => ctx.client_name(cl[0]),
-                n => format!("{} +{}", ctx.client_name(cl[0]), n - 1),
-            };
-            let wl = g.worst_layout();
-            let wfile = f7
-                .iter()
-                .find(|x| x.account == g.name && x.layout == wl)
-                .map(|x| x.file.clone())
-                .unwrap_or_default();
-            let last = g.freeze.last_ms.max(g.busy.last_ms);
-            URow {
-                account: person(&g.name),
-                url: ctl.user_url(&g.name),
-                user: names.get(&g.name).cloned().unwrap_or_default(),
-                clients: cname,
-                client_url: cl.first().map(|c| ctl.client_url(*c)).unwrap_or_default(),
-                seen: if last > 0 {
-                    ctx.when(last)
+    let f = ctx.facts(&r, &Filter::file(&file));
+    let names = user_names(&f);
+    let g = group(&f, |x| (String::new(), x.account.clone()));
+    let max = g.iter().map(|g| g.freeze.total).max().unwrap_or(0);
+    let mut t = Table::new(
+        "usr-table",
+        "user",
+        "users",
+        vec![
+            Col::text("account", "User"),
+            Col::text("name", "Name"),
+            Col::num("n", "Freezes"),
+            Col::num("total", "Frozen time"),
+            Col::text("", "Server / client"),
+            Col::num("p50", "p50").tip("Median freeze"),
+            Col::num("p95", "p95").tip("95th percentile freeze"),
+            Col::num("pct", "Server share").tip("Share of the frozen time that was server wait"),
+            Col::num("clients", "Clients").tip("Clients this user worked on"),
+            Col::text("layout", "Main layout").tip("The layout with the most frozen time"),
+            Col::num("seen", "Last seen"),
+        ],
+        "total",
+        "desc",
+    );
+    for g in &g {
+        let a = &g.freeze;
+        let cl: Vec<i64> = g.clients.iter().copied().collect();
+        let wl = g.worst_layout();
+        let wfile = f
+            .iter()
+            .find(|x| x.account == g.name && x.layout == wl)
+            .map(|x| x.file.clone())
+            .unwrap_or_default();
+        let last = g.freeze.last_ms.max(g.busy.last_ms);
+        let url = ctl.user_url(&g.name);
+        let clients = match cl.len() {
+            0 => Cell::none(),
+            1 => Cell::num("1", 1.0).link(ctl.client_url(cl[0])),
+            n => Cell::num(num(n as u64), n as f64).title(
+                cl.iter()
+                    .map(|c| ctx.client_name(*c))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+        };
+        let (p50, p95, share) = if a.n > 0 {
+            (
+                Cell::num(dur(a.p50()), a.p50() as f64),
+                Cell::num(dur(a.p95()), a.p95() as f64),
+                Cell::num(pct(a.share()), (a.share() * 1000.0).round()),
+            )
+        } else {
+            (Cell::none(), Cell::none(), Cell::none())
+        };
+        t.rows.push(Row::new(
+            vec![
+                Cell::text(person(&g.name)).link(url.clone()).mono(),
+                Cell::text(names.get(&g.name).cloned().unwrap_or_default()).muted(),
+                Cell::num(num(a.n), a.n as f64),
+                Cell::num(dur(a.total), a.total as f64),
+                Cell::split(Split::new(a, max), a.total as f64),
+                p50,
+                p95,
+                share,
+                clients,
+                if wl.is_empty() {
+                    Cell::text("—").muted()
                 } else {
-                    "—".into()
+                    Cell::text(wl.clone()).link(ctl.layout_url(&wfile, &wl))
                 },
-                n: num(t.freeze.n),
-                n_v: t.freeze.n,
-                total: dur(t.freeze.total),
-                total_v: t.freeze.total,
-                split: Split::new(&t.freeze, max),
-                pct: pct(t.freeze.share()),
-                pct_v: (t.freeze.share() * 1000.0) as u64,
-                n7: num(g.freeze.n),
-                total7: dur(g.freeze.total),
-                worst_url: if wl.is_empty() {
-                    String::new()
+                if last > 0 {
+                    Cell::num(ctx.when(last), last as f64).mono()
                 } else {
-                    ctl.layout_url(&wfile, &wl)
+                    Cell::none()
                 },
-                worst: if wl.is_empty() { "—".into() } else { wl },
-            }
-        })
-        .collect();
-    rows.sort_by(|a, b| b.total_v.cmp(&a.total_v).then(a.account.cmp(&b.account)));
-    let at = Agg::of(freezes_only(&ft));
-    let a7 = Agg::of(freezes_only(&f7));
-    let all_clients: BTreeSet<i64> = f7.iter().map(|x| x.client_id).collect();
-    let foot = URow {
-        account: "All".into(),
-        url: String::new(),
-        user: String::new(),
-        clients: num(all_clients.len() as u64),
-        client_url: String::new(),
-        seen: String::new(),
-        n: num(at.n),
-        n_v: 0,
-        total: dur(at.total),
-        total_v: 0,
-        split: Split::new(&at, at.total),
-        pct: pct(at.share()),
-        pct_v: 0,
-        n7: num(a7.n),
-        total7: dur(a7.total),
-        worst: String::new(),
-        worst_url: String::new(),
-    };
-    // Tiles.
-    let by_client = group(&f7, |x| (String::new(), x.client_id.to_string()));
-    let shared: Vec<&Group> = by_client
+            ],
+            url,
+        ));
+    }
+    let all = Agg::of(freezes_only(&f));
+    let all_clients: BTreeSet<i64> = f.iter().map(|x| x.client_id).collect();
+    t.foot = vec![
+        Cell::text("All"),
+        Cell::text(""),
+        Cell::num(num(all.n), 0.0),
+        Cell::num(dur(all.total), 0.0),
+        Cell::split(Split::new(&all, all.total), 0.0),
+        Cell::num(dur(all.p50()), 0.0),
+        Cell::num(dur(all.p95()), 0.0),
+        Cell::num(pct(all.share()), 0.0),
+        Cell::num(num(all_clients.len() as u64), 0.0),
+        Cell::text(""),
+        Cell::text(""),
+    ];
+    // Who shares clients, and who uses more than one (the old stat cards).
+    let by_client = group(&f, |x| (String::new(), x.client_id.to_string()));
+    let shared: Vec<String> = by_client
         .iter()
         .filter(|g| g.accounts.iter().filter(|a| !a.is_empty()).count() > 1)
-        .collect();
-    let multi: Vec<&Group> = g7.iter().filter(|g| g.clients.len() > 1).collect();
-    let top = gt.values().max_by_key(|g| (g.freeze.total, g.name.clone()));
-    let mut t2 = tile(
-        "Most time frozen today",
-        top.map(|g| person(&g.name)).unwrap_or_else(|| "—".into()),
-        top.map(|g| format!("{} · {} freezes", dur(g.freeze.total), num(g.freeze.n)))
-            .unwrap_or_default(),
-    );
-    if let Some(g) = top {
-        t2.small = names.get(&g.name).cloned().unwrap_or_default();
-        t2.link = ctl.user_url(&g.name);
-    }
-    let mut t3 = tile(
-        "Shared clients",
-        num(shared.len() as u64),
-        shared
-            .first()
-            .map(|g| {
-                let id: i64 = g.name.parse().unwrap_or(0);
-                format!(
-                    "{} · {}",
-                    ctx.client_name(id),
-                    g.accounts
-                        .iter()
-                        .filter(|a| !a.is_empty())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            })
-            .unwrap_or_else(|| "—".into()),
-    );
-    if let Some(g) = shared.first() {
-        t3.link = ctl.client_url(g.name.parse().unwrap_or(0));
-    }
-    let mut t4 = tile(
-        "Accounts on 2+ clients",
-        num(multi.len() as u64),
-        multi
-            .first()
-            .map(|g| format!("{} · 7 days", person(&g.name)))
-            .unwrap_or_else(|| "—".into()),
-    );
-    if let Some(g) = multi.first() {
-        t4.link = ctl.user_url(&g.name);
-    }
-    let tiles = vec![
-        tile(
-            "Accounts",
-            num(g7.len() as u64),
+        .map(|g| {
             format!(
-                "{} with freezes today",
-                gt.values().filter(|g| g.freeze.n > 0).count()
-            ),
-        ),
-        t2,
-        t3,
-        t4,
-    ];
+                "{} ({})",
+                ctx.client_name(g.name.parse().unwrap_or(0)),
+                g.accounts
+                    .iter()
+                    .filter(|a| !a.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+        .collect();
+    let multi: Vec<String> = g
+        .iter()
+        .filter(|g| g.clients.len() > 1)
+        .map(|g| person(&g.name))
+        .collect();
+    let list = |v: &[String]| {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            let mut s = v.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            if v.len() > 3 {
+                s.push_str(&format!(" and {} more", v.len() - 3));
+            }
+            s
+        }
+    };
+    t.note = format!(
+        "Shared clients (2+ users): {}. Users on 2+ clients: {}.",
+        list(&shared),
+        list(&multi)
+    );
     Users {
-        tiles,
-        rows,
-        foot,
+        table: t.apply("/users", p),
         ctl,
     }
 }
@@ -1914,6 +1867,7 @@ pub struct UserDetail {
     pub busy: Vec<NRow>,
     pub by_dur: Hist,
     pub events: Vec<FRow>,
+    pub table: Table,
 }
 
 fn sessions_count(ctx: &Ctx, client: i64, since: i64) -> u64 {
@@ -2024,11 +1978,23 @@ pub fn user_detail(ctx: &Ctx, p: &Params) -> UserDetail {
             end_ms: r.end_ms,
             filter: filt.clone(),
             types: vec!["freeze", "script_busy", "mark"],
-            limit: 12,
+            limit: 300,
             ..Default::default()
         },
     );
+    let table = events_table(
+        "usr-events",
+        &events,
+        FzCols {
+            file: true,
+            client: true,
+            account: false,
+        },
+        p,
+        "/user",
+    );
     UserDetail {
+        table,
         account: person(&p.account),
         user,
         files: files.into_iter().collect::<Vec<_>>().join(" · "),
@@ -2061,169 +2027,149 @@ pub fn user_detail(ctx: &Ctx, p: &Params) -> UserDetail {
 
 // ---------------------------------------------------------------- clients
 
-pub struct CRow {
-    pub id: i64,
-    pub name: String,
-    pub url: String,
-    pub accounts: String,
-    pub account_url: String,
-    pub connected: bool,
-    pub status: String,
-    pub seen: String,
-    pub quiet: String,
-    pub app: String,
-    pub plugin: String,
-    pub old: bool,
-    pub n: String,
-    pub n_v: u64,
-    pub total: String,
-    pub total_v: u64,
-    pub split: Split,
-    pub pct: String,
-    pub n7: String,
-    pub total7: String,
-    pub worst: String,
-    pub worst_url: String,
-}
-
 pub struct Clients {
     pub ctl: Ctl,
-    pub tiles: Vec<Tile>,
-    pub app_versions: Vec<(String, String, bool)>,
-    pub plugin_versions: Vec<(String, String, bool)>,
-    pub flag_count: usize,
-    pub flag_chips: Vec<String>,
-    pub rows: Vec<CRow>,
-    pub lanes: Lanes,
+    pub table: Table,
 }
 
 pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
     let today = Range::today(ctx.z, ctx.now);
-    let week = Range::week(ctx.z, ctx.now);
-    let mut ctl = ctx.ctl("/clients", p, &week);
-    ctl.show_range = false;
-    ctl.range = "today".into();
-    ctl.date = format!(
-        "{} {}",
-        ctx.z.fmt(ctx.now, "%a, %b %-d, %Y · %H:%M"),
-        ctx.z.abbr(ctx.now)
-    );
+    let r = p.range(ctx.z, ctx.now);
+    let ctl = ctx.ctl("/clients", p, &r);
     let file = p.file_opt();
-    let f7 = ctx.facts(&week, &Filter::file(&file));
-    let g7: HashMap<i64, Group> = group(&f7, |x| (String::new(), x.client_id.to_string()))
+    let f = ctx.facts(&r, &Filter::file(&file));
+    let g7: HashMap<i64, Group> = group(&f, |x| (String::new(), x.client_id.to_string()))
         .into_iter()
         .map(|g| (g.name.parse().unwrap_or(0), g))
         .collect();
-    let ft: Vec<Fact> = f7
-        .iter()
-        .filter(|x| x.ts_ms >= today.start_ms)
-        .cloned()
-        .collect();
-    let gt: HashMap<i64, Group> = group(&ft, |x| (String::new(), x.client_id.to_string()))
+    let max = g7.values().map(|g| g.freeze.total).max().unwrap_or(0);
+    // The flags (silent, old plug-in) are about now: today's facts.
+    let ft: Vec<Fact> = ctx
+        .facts(&today, &Filter::file(&file))
         .into_iter()
-        .map(|g| (g.name.parse().unwrap_or(0), g))
         .collect();
-    let max = gt.values().map(|g| g.freeze.total).max().unwrap_or(0);
     let flags = query::flags(&ft, &ctx.clients, &ctx.s, ctx.now);
     let empty = Group::default();
-    let mut rows: Vec<CRow> = ctx
+    let mut t = Table::new(
+        "cl-table",
+        "client",
+        "clients",
+        vec![
+            Col::text("name", "Client"),
+            Col::text("status", "Status"),
+            Col::text("accounts", "Users"),
+            Col::num("n", "Freezes"),
+            Col::num("total", "Frozen time"),
+            Col::text("", "Server / client"),
+            Col::num("p95", "p95").tip("95th percentile freeze"),
+            Col::num("srtt", "SRTT median").tip("Median SRTT of the freezes, ms"),
+            Col::num("pct", "Server share").tip("Share of the frozen time that was server wait"),
+            Col::text("app", "FileMaker"),
+            Col::text("plugin", "Plug-in"),
+            Col::text("layout", "Main layout").tip("The layout with the most frozen time"),
+            Col::num("seen", "Last seen"),
+        ],
+        "total",
+        "desc",
+    );
+    let mut av: BTreeMap<String, usize> = BTreeMap::new();
+    let mut pv: BTreeMap<String, usize> = BTreeMap::new();
+    for c in ctx
         .clients
         .iter()
         .filter(|c| c.last_seen_ms >= ctx.now - 30 * DAY_MS || g7.contains_key(&c.id))
-        .map(|c| {
-            let t = gt.get(&c.id).unwrap_or(&empty);
-            let g = g7.get(&c.id).unwrap_or(&empty);
-            let accts: Vec<&String> = g.accounts.iter().filter(|a| !a.is_empty()).collect();
-            let quiet = flags
-                .quiet
-                .iter()
-                .find(|q| q.0 == c.id)
-                .map(|q| quiet_text(q.2))
-                .unwrap_or_default();
-            let wl = g.worst_layout();
-            let wfile = f7
-                .iter()
-                .find(|x| x.client_id == c.id && x.layout == wl)
-                .map(|x| x.file.clone())
-                .unwrap_or_default();
-            CRow {
-                id: c.id,
-                name: c.label(),
-                url: ctl.client_url(c.id),
-                accounts: match accts.len() {
-                    0 => "—".into(),
-                    1 => accts[0].clone(),
-                    n => format!("{} +{}", accts[0], n - 1),
-                },
-                account_url: accts.first().map(|a| ctl.user_url(a)).unwrap_or_default(),
-                connected: c.connected,
-                status: if c.connected {
-                    "Connected".into()
-                } else {
-                    "Offline".into()
-                },
-                seen: ctx.when(c.last_seen_ms),
-                quiet,
-                app: c.app.clone(),
-                old: !c.plugin.is_empty() && query::version_lt(&c.plugin, &ctx.s.flag_plugin_min),
-                plugin: c.plugin.clone(),
-                n: num(t.freeze.n),
-                n_v: t.freeze.n,
-                total: dur(t.freeze.total),
-                total_v: t.freeze.total,
-                split: Split::new(&t.freeze, max),
-                pct: pct(t.freeze.share()),
-                n7: num(g.freeze.n),
-                total7: dur(g.freeze.total),
-                worst_url: if wl.is_empty() {
-                    String::new()
-                } else {
-                    ctl.layout_url(&wfile, &wl)
-                },
-                worst: if wl.is_empty() { "—".into() } else { wl },
-            }
-        })
-        .collect();
-    rows.sort_by(|a, b| {
-        b.connected
-            .cmp(&a.connected)
-            .then(b.total_v.cmp(&a.total_v))
-            .then(a.name.cmp(&b.name))
-    });
-    let on = rows.iter().filter(|r| r.connected).count();
-    let accounts_today: BTreeSet<&str> = ft
-        .iter()
-        .map(|x| x.account.as_str())
-        .filter(|a| !a.is_empty())
-        .collect();
-    let files_today: BTreeSet<&str> = ft
-        .iter()
-        .map(|x| x.file.as_str())
-        .filter(|a| !a.is_empty())
-        .collect();
-    let mut t1 = tile("Clients", num(rows.len() as u64), String::new());
-    t1.sub = format!("{on} connected · {} offline", rows.len() - on);
-    let mut t2 = tile(
-        "Accounts today",
-        num(accounts_today.len() as u64),
-        files_today.iter().copied().collect::<Vec<_>>().join(" · "),
-    );
-    t2.link = "/users".into();
-    let mut av: BTreeMap<String, usize> = BTreeMap::new();
-    let mut pv: BTreeMap<String, usize> = BTreeMap::new();
-    for r in &rows {
-        *av.entry(if r.app.is_empty() {
+    {
+        let g = g7.get(&c.id).unwrap_or(&empty);
+        let a = &g.freeze;
+        let accts: Vec<&String> = g.accounts.iter().filter(|a| !a.is_empty()).collect();
+        let quiet = flags
+            .quiet
+            .iter()
+            .find(|q| q.0 == c.id)
+            .map(|q| quiet_text(q.2))
+            .unwrap_or_default();
+        let old = !c.plugin.is_empty() && query::version_lt(&c.plugin, &ctx.s.flag_plugin_min);
+        let wl = g.worst_layout();
+        let wfile = f
+            .iter()
+            .find(|x| x.client_id == c.id && x.layout == wl)
+            .map(|x| x.file.clone())
+            .unwrap_or_default();
+        *av.entry(if c.app.is_empty() {
             "—".into()
         } else {
-            r.app.clone()
+            c.app.clone()
         })
         .or_default() += 1;
-        *pv.entry(if r.plugin.is_empty() {
+        *pv.entry(if c.plugin.is_empty() {
             "—".into()
         } else {
-            r.plugin.clone()
+            c.plugin.clone()
         })
         .or_default() += 1;
+        let acc = match accts.len() {
+            0 => Cell::text("—").muted(),
+            1 => Cell::text(accts[0].clone())
+                .link(ctl.user_url(accts[0]))
+                .mono(),
+            n => Cell::text(format!("{} +{}", accts[0], n - 1))
+                .link(ctl.user_url(accts[0]))
+                .mono()
+                .title(
+                    accts
+                        .iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+        };
+        let (p95, share, srtt) = if a.n > 0 {
+            (
+                Cell::num(dur(a.p95()), a.p95() as f64),
+                Cell::num(pct(a.share()), (a.share() * 1000.0).round()),
+                if a.srtt_p(0.5) > 0 {
+                    Cell::num(format!("{}\u{a0}ms", a.srtt_p(0.5)), a.srtt_p(0.5) as f64)
+                } else {
+                    Cell::none()
+                },
+            )
+        } else {
+            (Cell::none(), Cell::none(), Cell::none())
+        };
+        let url = ctl.client_url(c.id);
+        t.rows.push(
+            Row::new(
+                vec![
+                    Cell::text(c.label()).link(url.clone()),
+                    Cell::text(if c.connected { "Online" } else { "Offline" })
+                        .dot(if c.connected { "ok" } else { "off" })
+                        .sort(c.connected as u8 as f64),
+                    acc,
+                    Cell::num(num(a.n), a.n as f64),
+                    Cell::num(dur(a.total), a.total as f64),
+                    Cell::split(Split::new(a, max), a.total as f64),
+                    p95,
+                    srtt,
+                    share,
+                    Cell::text(c.app.clone()),
+                    if old {
+                        Cell::text(c.plugin.clone()).flag(c.plugin.clone())
+                    } else {
+                        Cell::text(c.plugin.clone())
+                    },
+                    if wl.is_empty() {
+                        Cell::text("—").muted()
+                    } else {
+                        Cell::text(wl.clone()).link(ctl.layout_url(&wfile, &wl))
+                    },
+                    Cell::num(ctx.when(c.last_seen_ms), c.last_seen_ms as f64)
+                        .mono()
+                        .chip(quiet.clone()),
+                ],
+                url,
+            )
+            .flagged(!quiet.is_empty() || old),
+        );
     }
     let mut chips = vec![];
     if !flags.quiet.is_empty() {
@@ -2232,25 +2178,33 @@ pub fn clients(ctx: &Ctx, p: &Params) -> Clients {
     if !flags.old.is_empty() {
         chips.push(format!("plug-in < {}", ctx.s.flag_plugin_min));
     }
+    let fmt_v = |m: BTreeMap<String, usize>| {
+        m.into_iter()
+            .rev()
+            .map(|(k, n)| format!("{k} ×{n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let accounts_today: BTreeSet<&str> = ft
+        .iter()
+        .map(|x| x.account.as_str())
+        .filter(|a| !a.is_empty())
+        .collect();
+    t.note = format!(
+        "FileMaker: {}. Plug-in: {}. {} flagged{}. {} users with freezes today.",
+        fmt_v(av),
+        fmt_v(pv),
+        flags.quiet.len() + flags.old.len(),
+        if chips.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", chips.join(", "))
+        },
+        accounts_today.len()
+    );
+    t.note_link = ("/users".into(), "Users".into());
     Clients {
-        tiles: vec![t1, t2],
-        app_versions: av
-            .into_iter()
-            .rev()
-            .map(|(k, n)| (k, num(n as u64), false))
-            .collect(),
-        plugin_versions: pv
-            .into_iter()
-            .rev()
-            .map(|(k, n)| {
-                let old = query::version_lt(&k, &ctx.s.flag_plugin_min);
-                (k, num(n as u64), old)
-            })
-            .collect(),
-        flag_count: flags.quiet.len() + flags.old.len(),
-        flag_chips: chips,
-        rows,
-        lanes: today_lanes(ctx, p),
+        table: t.apply("/clients", p),
         ctl,
     }
 }
@@ -2413,6 +2367,7 @@ pub struct ClientDetail {
     pub chart_title: String,
     pub chart: Chart,
     pub events: Vec<FRow>,
+    pub table: Table,
 }
 
 pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
@@ -2508,12 +2463,24 @@ pub fn client_detail(ctx: &Ctx, p: &Params) -> ClientDetail {
             end_ms: r.end_ms,
             filter: filt.clone(),
             types: vec!["freeze", "script_busy", "mark"],
-            limit: 12,
+            limit: 300,
             ..Default::default()
         },
     );
     let c2 = c.clone().unwrap_or_default();
+    let table = events_table(
+        "cl-events",
+        &events,
+        FzCols {
+            file: true,
+            client: false,
+            account: true,
+        },
+        p,
+        "/client",
+    );
     ClientDetail {
+        table,
         found: c.is_some(),
         name: c
             .as_ref()
@@ -2583,19 +2550,42 @@ pub struct Freezes {
 /// filter need all rows, so the page does not load more in parts then).
 pub const FREEZES_CAP: usize = 5000;
 
-fn freeze_cols(show_file: bool) -> Vec<Col> {
+/// Which optional columns an events table has. The page that lists the
+/// events of one client leaves the client out, and so on.
+#[derive(Debug, Clone, Copy)]
+pub struct FzCols {
+    pub file: bool,
+    pub client: bool,
+    pub account: bool,
+}
+
+impl FzCols {
+    pub fn all(file: bool) -> FzCols {
+        FzCols {
+            file,
+            client: true,
+            account: true,
+        }
+    }
+}
+
+fn freeze_cols(o: FzCols) -> Vec<Col> {
     let mut c = vec![
         Col::text("time", "Time").tip("Local time of the server time zone"),
         Col::num("dur", "Duration"),
         Col::text("", "Server / client"),
         Col::text("layout", "Layout"),
         Col::text("from", "From layout"),
-        Col::text("account", "Account"),
-        Col::text("user", "User"),
-        Col::text("client", "Client"),
-        Col::text("script", "Script"),
     ];
-    if show_file {
+    if o.account {
+        c.push(Col::text("account", "Account"));
+        c.push(Col::text("user", "User"));
+    }
+    if o.client {
+        c.push(Col::text("client", "Client"));
+    }
+    c.push(Col::text("script", "Script"));
+    if o.file {
         c.push(Col::text("file", "File"));
     }
     c.push(Col::num("rt", "Round trips"));
@@ -2604,7 +2594,7 @@ fn freeze_cols(show_file: bool) -> Vec<Col> {
 }
 
 /// The cells of one freeze row (the columns of [`freeze_cols`]).
-pub fn freeze_row(r: &FRow, show_file: bool) -> Row {
+pub fn freeze_row(r: &FRow, o: FzCols) -> Row {
     let mut c = vec![
         Cell::text(r.t.clone())
             .link(r.url.clone())
@@ -2622,18 +2612,24 @@ pub fn freeze_row(r: &FRow, show_file: bool) -> Row {
         ),
         Cell::text(r.layout.clone()).link(r.layout_url.clone()),
         Cell::text(r.from.clone()).muted(),
-        Cell::text(r.account.clone())
-            .link(r.user_url.clone())
-            .mono(),
-        Cell::text(r.user.clone()).muted(),
-        Cell::text(r.client.clone()).link(r.client_url.clone()),
-        if r.script_url.is_empty() {
-            Cell::text(r.script.clone()).muted()
-        } else {
-            Cell::text(r.script.clone()).link(r.script_url.clone())
-        },
     ];
-    if show_file {
+    if o.account {
+        c.push(
+            Cell::text(r.account.clone())
+                .link(r.user_url.clone())
+                .mono(),
+        );
+        c.push(Cell::text(r.user.clone()).muted());
+    }
+    if o.client {
+        c.push(Cell::text(r.client.clone()).link(r.client_url.clone()));
+    }
+    c.push(if r.script_url.is_empty() {
+        Cell::text(r.script.clone()).muted()
+    } else {
+        Cell::text(r.script.clone()).link(r.script_url.clone())
+    });
+    if o.file {
         c.push(Cell::text(r.file.clone()).muted());
     }
     c.push(if r.rt.is_empty() {
@@ -2652,6 +2648,15 @@ pub fn freeze_row(r: &FRow, show_file: bool) -> Row {
         Cell::num(r.pct.clone(), v)
     });
     Row::new(c, r.url.clone()).id(r.id.to_string())
+}
+
+/// The events of a detail page as a kit table (sorted and filtered in the
+/// page; the newest first).
+pub fn events_table(id: &str, rows: &[FRow], o: FzCols, p: &Params, path: &str) -> Table {
+    let mut t = Table::new(id, "event", "events", freeze_cols(o), "time", "desc");
+    t.inline = true;
+    t.rows = rows.iter().map(|r| freeze_row(r, o)).collect();
+    t.apply(path, p)
 }
 
 pub const PAGE: usize = 100;
@@ -2707,7 +2712,7 @@ pub fn freezes(ctx: &Ctx, p: &Params) -> Freezes {
         "fz-table",
         "freeze",
         "freezes",
-        freeze_cols(show_file),
+        freeze_cols(FzCols::all(show_file)),
         "time",
         "desc",
     );
@@ -2813,7 +2818,10 @@ pub fn freezes(ctx: &Ctx, p: &Params) -> Freezes {
         })
         .unwrap_or_default();
     let loaded = rows.len();
-    table.rows = rows.iter().map(|r| freeze_row(r, show_file)).collect();
+    table.rows = rows
+        .iter()
+        .map(|r| freeze_row(r, FzCols::all(show_file)))
+        .collect();
     let mut table = table.apply("/freezes", p);
     table.more = more_url.clone();
     if custom {

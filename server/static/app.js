@@ -231,25 +231,6 @@
     setSide(!sideRail());
   });
 
-  // ---------------------------------------------------------------- tables
-  // The old button sort of the Users and Clients tables. Part 2 moves them
-  // to the table kit and removes this.
-  function sortTable(btn) {
-    var table = btn.closest("table");
-    var col = +btn.getAttribute("data-col");
-    var body = table.tBodies[0];
-    var rows = Array.prototype.slice.call(body.rows);
-    var asc = btn.getAttribute("aria-pressed") === "true" && btn.getAttribute("data-dir") === "desc";
-    rows.sort(function (a, b) {
-      var x = +(a.cells[col].getAttribute("data-v") || 0), y = +(b.cells[col].getAttribute("data-v") || 0);
-      return asc ? x - y : y - x;
-    });
-    rows.forEach(function (r) { body.appendChild(r); });
-    table.querySelectorAll(".sortb").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-    btn.setAttribute("aria-pressed", "true");
-    btn.setAttribute("data-dir", asc ? "asc" : "desc");
-  }
-
   // ---------------------------------------------------------------- setup
   function stepText() {
     var pre = document.getElementById("step-calc");
@@ -274,8 +255,6 @@
     } else if (t.hasAttribute("data-preset") && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
       var pf = t.closest("[data-lanes].zoomable");
       if (pf) { e.preventDefault(); animateTo(pf, presetView(pf, t.getAttribute("data-preset"))); }
-    } else if (t.classList.contains("sortb")) {
-      sortTable(t);
     } else if (t.classList.contains("tks")) {
       var tk = t.closest("[data-tk]");
       if (tk && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
@@ -1086,7 +1065,6 @@
     if (el.hasAttribute("data-grown")) return true;
     // A drag on the navigator: swap when it ends.
     if (nav && nav.f === el) { live.dirty = true; return true; }
-    if (el.querySelector('.sortb[aria-pressed="true"]')) return true;
     var a = document.activeElement;
     return !!(a && el.contains(a) && a.matches("input, select, textarea"));
   }

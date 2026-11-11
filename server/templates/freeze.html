@@ -25,7 +25,7 @@
 {% endblock %}
 {% block content %}
 {% if !v.found %}<div class="card"><div class="empty">No freeze</div></div>{% else %}
-{% call m::tiles(v.tiles, "g-tiles") %}
+{% call m::metrics(v.tiles) %}
 
 <div class="card">
 <div class="ch"><h2 class="ct">Timeline</h2><span class="key"><span class="sw sw-s"></span>{{ v.srv_label }}</span><span class="key"><span class="sw sw-c"></span>{{ v.cli_label }}</span>{% if !v.marks.is_empty() %}<span class="key"><span class="sw sw-m"></span>Mark</span>{% endif %}</div>

@@ -243,16 +243,22 @@ fn every_page_renders_with_synthetic_data() {
         (
             "/users",
             &[
-                "All accounts",
-                "Shared clients",
-                "Accounts on 2+ clients",
+                "Filter users",
+                "Shared clients (2+ users)",
+                "Users on 2+ clients",
                 "arivera",
                 "A. Rivera",
             ],
         ),
         (
             "/clients",
-            &["Who froze, when", "FileMaker Pro", "0.0.9", "Connected"],
+            &[
+                "Filter clients",
+                "FileMaker",
+                "0.0.9",
+                "Online",
+                "SRTT median",
+            ],
         ),
         ("/freezes?range=7d", &["freezes", "Load more", "Clear"]),
         (
@@ -477,12 +483,13 @@ fn pages_mark_their_live_parts_and_work_without_js() {
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     // Each part that app.js swaps has an id and data-live, on the page
     // that the browser gets without JS.
-    let want: [(&str, &[&str]); 6] = [
+    let want: [(&str, &[&str]); 7] = [
         ("/", &["ov-flags", "ov-tiles", "ov-latest", "srv"]),
         ("/freezes", &["fz-table", "srv"]),
         ("/layouts", &["lay-table", "srv"]),
         ("/scripts", &["scr-table", "srv"]),
-        ("/clients", &["cl-tiles", "cl-table", "srv"]),
+        ("/clients", &["cl-table", "srv"]),
+        ("/users", &["usr-table", "srv"]),
         ("/setup", &["srv"]),
     ];
     for (path, ids) in want {
@@ -888,4 +895,102 @@ fn table_pages_keep_sort_and_filter_in_the_url_and_read_without_js() {
     let account = get(&base, "/freezes?range=7d&q=arivera").body;
     assert!(first_cells(&account).len() < rows.len());
     assert!(account.contains("arivera"));
+}
+
+#[test]
+fn users_and_clients_are_tables_and_the_timeline_is_on_the_client_page() {
+    let (app, base, _d) = server("users-clients");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+
+    // The lists: a kit table, no stat cards, no timeline.
+    for path in ["/users?range=7d", "/clients?range=7d"] {
+        let b = get(&base, path).body;
+        assert!(b.contains("data-tk"), "{path}");
+        assert!(!b.contains("class=\"card tile\""), "{path}: stat cards");
+        assert!(!b.contains("data-lanes"), "{path}: timeline");
+        assert!(b.contains("data-href=\""), "{path}: row link");
+    }
+    let users = get(&base, "/users?range=7d").body;
+    for col in [
+        "Freezes",
+        "Frozen time",
+        "Server / client",
+        "p50",
+        "p95",
+        "Server share",
+        "Clients",
+        "Main layout",
+        "Last seen",
+    ] {
+        assert!(users.contains(col), "users column {col}");
+    }
+    let clients = get(&base, "/clients?range=7d").body;
+    for col in [
+        "Status",
+        "Users",
+        "Frozen time",
+        "p95",
+        "SRTT median",
+        "Plug-in",
+        "Last seen",
+    ] {
+        assert!(clients.contains(col), "clients column {col}");
+    }
+    assert!(clients.contains("Online") || clients.contains("Offline"));
+
+    // Sort state in the URL works on both.
+    let by_name = first_cells(&get(&base, "/users?range=7d&sort=account&dir=asc").body);
+    let mut sorted = by_name.clone();
+    sorted.sort();
+    assert_eq!(by_name, sorted);
+    let q = get(&base, "/clients?range=7d&q=zzzzqqq").body;
+    assert!(first_cells(&q).is_empty() && q.contains("match"));
+
+    // The client page: the timeline first, then that client's freezes, then
+    // SRTT. No stat cards.
+    let id = clients
+        .split("href=\"/client?id=")
+        .nth(1)
+        .unwrap()
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .unwrap()
+        .to_string();
+    let page = get(&base, &format!("/client?id={id}&range=7d")).body;
+    assert!(!page.contains("class=\"card tile\""));
+    let lanes = page.find("data-lanes").expect("timeline");
+    let table = page.find("id=\"cl-events\"").expect("freezes table");
+    let srtt = page.find("SRTT by hour").expect("srtt");
+    assert!(lanes < table && table < srtt);
+    assert!(page.contains("data-nav"), "range navigator");
+
+    // The user page: no stat cards, the events as a table.
+    let user = get(&base, "/user?account=arivera&range=7d").body;
+    assert!(!user.contains("class=\"card tile\""));
+    assert!(user.contains("id=\"usr-events\""));
+    // Layout, script and freeze pages too.
+    let any = |path: &str| {
+        let list = get(&base, path).body;
+        let l = list
+            .split("href=\"/")
+            .skip(1)
+            .map(|p| p.split('"').next().unwrap())
+            .find(|l| {
+                l.starts_with(&format!(
+                    "{}?",
+                    path[1..].split('?').next().unwrap().trim_end_matches('s')
+                ))
+            })
+            .unwrap()
+            .to_string();
+        get(&base, &format!("/{l}")).body
+    };
+    for list in ["/layouts?range=7d", "/scripts?range=7d"] {
+        let detail = any(list);
+        assert!(!detail.contains("class=\"card tile\""), "{list} detail");
+        assert!(detail.contains("<th>Metric</th>"));
+    }
 }
