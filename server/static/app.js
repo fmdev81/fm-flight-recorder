@@ -1,5 +1,5 @@
 // FM Flight Recorder dashboard: the client lanes (tooltip, arrow keys, range
-// navigator, REC clock), charts (uPlot), hover readout, table sort, theme switch, copy,
+// navigator, REC clock), charts (uPlot), hover readout, the table kit (sort, filter), theme switch, copy,
 // relative times and live updates.
 // No framework, no build step.
 (function () {
@@ -232,6 +232,8 @@
   });
 
   // ---------------------------------------------------------------- tables
+  // The old button sort of the Users and Clients tables. Part 2 moves them
+  // to the table kit and removes this.
   function sortTable(btn) {
     var table = btn.closest("table");
     var col = +btn.getAttribute("data-col");
@@ -274,6 +276,12 @@
       if (pf) { e.preventDefault(); animateTo(pf, presetView(pf, t.getAttribute("data-preset"))); }
     } else if (t.classList.contains("sortb")) {
       sortTable(t);
+    } else if (t.classList.contains("tks")) {
+      var tk = t.closest("[data-tk]");
+      if (tk && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        tkSort(tk, t.closest("th").getAttribute("data-key"));
+      }
     } else if (t.id === "token-toggle") {
       var inp = document.getElementById("srv-token");
       var show = inp.type === "password";
@@ -308,8 +316,8 @@
   document.body.addEventListener("htmx:afterSwap", function (e) {
     // "Load more" grew the list: live updates leave it alone from now on.
     var tg = e.detail && e.detail.target;
-    if (tg && tg.id === "fz-body") {
-      var fl = document.getElementById("fz-list");
+    if (tg && /-body$/.test(tg.id)) {
+      var fl = tg.closest("[data-tk]");
       if (fl) fl.setAttribute("data-grown", "1");
     }
     stepText();
@@ -885,6 +893,179 @@
     document.querySelectorAll("[data-lanes]").forEach(declutter);
   });
 
+  // ---------------------------------------------------------------- table kit
+  // The list pages (src/table.rs, templates/tk.html). The server renders the
+  // rows in the order of the URL (sort=KEY&dir=asc|desc&q=TEXT). Here a click on
+  // a header and the filter box sort and filter the rows in the page and
+  // keep the same three parameters in the URL, so a link, a reload and a live
+  // update keep the state. A table with data-server (the page loads rows in
+  // parts) asks the server for the part again instead. The order is the one
+  // of table.rs: numbers by number, text by lower-case text, equal rows by the
+  // first column.
+  function tkFirstDir(th) { return th.hasAttribute("data-num") ? "desc" : "asc"; }
+
+  function tkRead(t) {
+    var u = new URL(location.href).searchParams;
+    var ths = t.querySelectorAll("thead th[data-key]");
+    var sort = t.getAttribute("data-sort"), dir = t.getAttribute("data-dir");
+    var k = u.get("sort");
+    if (k && Array.prototype.some.call(ths, function (h) { return h.getAttribute("data-key") === k; })) {
+      sort = k;
+      dir = u.get("dir") === "asc" || u.get("dir") === "desc" ? u.get("dir") : null;
+      if (!dir) { var th0 = t.querySelector('thead th[data-key="' + k + '"]'); dir = tkFirstDir(th0); }
+    }
+    return { sort: sort, dir: dir, q: (u.get("q") || "").trim() };
+  }
+
+  function tkUrl(st) {
+    var u = new URL(location.href);
+    u.searchParams.set("sort", st.sort);
+    u.searchParams.set("dir", st.dir);
+    if (st.q) u.searchParams.set("q", st.q); else u.searchParams.delete("q");
+    u.searchParams.delete("before");
+    u.searchParams.delete("shown");
+    return u;
+  }
+
+  function tkSave(st) {
+    var u = tkUrl(st);
+    try { history.replaceState(null, "", u.pathname + u.search); } catch (e) { /* the page still works */ }
+    return u;
+  }
+
+  function tkLinks(t, st) {
+    t.querySelectorAll("thead th[data-key]").forEach(function (th) {
+      var key = th.getAttribute("data-key"), a = th.querySelector("a.tks");
+      if (!key || !a) return;
+      var on = key === st.sort;
+      var next = on ? (st.dir === "asc" ? "desc" : "asc") : tkFirstDir(th);
+      var u = tkUrl({ sort: key, dir: next, q: st.q });
+      a.setAttribute("href", u.pathname + u.search);
+      th.setAttribute("aria-sort", on ? (st.dir === "asc" ? "ascending" : "descending") : "none");
+      a.querySelector(".arr").textContent = on ? (st.dir === "asc" ? "\u25B2" : "\u25BC") : "";
+    });
+    var f = t.querySelector("form.tkq");
+    if (f) { f.elements.sort.value = st.sort; f.elements.dir.value = st.dir; }
+    t.setAttribute("data-sort", st.sort);
+    t.setAttribute("data-dir", st.dir);
+  }
+
+  function tkNoun(t, n) { return t.getAttribute(n === 1 ? "data-one" : "data-many"); }
+
+  function tkApply(t, st) {
+    var body = t.querySelector("tbody");
+    var th = t.querySelector('thead th[data-key="' + st.sort + '"]');
+    if (!th) return;
+    var ci = Array.prototype.indexOf.call(th.parentNode.cells, th), num = th.hasAttribute("data-num");
+    var terms = st.q.toLowerCase().split(/\s+/).filter(Boolean);
+    var rows = Array.prototype.slice.call(body.rows), shown = 0;
+    var val = function (r, i) { var v = r.cells[i].getAttribute("data-v") || ""; return num ? parseFloat(v) || 0 : v; };
+    rows.forEach(function (r) {
+      var s = r.getAttribute("data-s") || "";
+      r.hidden = !terms.every(function (x) { return s.indexOf(x) >= 0; });
+      if (!r.hidden) shown++;
+    });
+    var sign = st.dir === "desc" ? -1 : 1;
+    rows.sort(function (a, b) {
+      var x = val(a, ci), y = val(b, ci), o = x < y ? -1 : x > y ? 1 : 0;
+      if (o) return o * sign;
+      var p = a.cells[0].getAttribute("data-v") || "", q = b.cells[0].getAttribute("data-v") || "";
+      return p < q ? -1 : p > q ? 1 : 0;
+    });
+    rows.forEach(function (r) { body.appendChild(r); });
+    var all = rows.length, n = t.querySelector("[data-tkn]");
+    if (n) n.textContent = (shown === all ? shown + " " + tkNoun(t, shown) : shown + " of " + all + " " + tkNoun(t, all));
+    var em = t.querySelector("[data-tkempty]");
+    if (em) {
+      em.hidden = shown > 0;
+      em.textContent = st.q ? "No " + t.getAttribute("data-many") + " match \u201C" + st.q + "\u201D" : "No " + t.getAttribute("data-many");
+    }
+    tkLinks(t, st);
+  }
+
+  var tkSeq = 0, tkTimer = null;
+  // The page loads rows in parts: ask the server for the part again.
+  function tkReload(t, st) {
+    var u = tkSave(st), id = t.id, seq = ++tkSeq;
+    fetch(u.href, { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (txt) {
+        if (!txt || seq !== tkSeq) return;
+        var nu = new DOMParser().parseFromString(txt, "text/html").getElementById(id);
+        var cur = document.getElementById(id);
+        if (!nu || !cur) return;
+        ["tkw", "tkn", "more", "tknote"].forEach(function (c) {
+          var a = cur.querySelector("." + c), b = nu.querySelector("." + c);
+          if (a && b) { var imp = document.importNode(b, true); a.replaceWith(imp); if (window.htmx) window.htmx.process(imp); }
+          else if (a && !b) a.remove();
+          else if (!a && b) cur.appendChild(document.importNode(b, true));
+        });
+        cur.removeAttribute("data-grown");
+        live.src[id] = nu.outerHTML;
+        tkLinks(cur, tkRead(cur));
+      })
+      .catch(function () { /* the next change tries again */ });
+  }
+
+  function tkSet(t, st, soon) {
+    if (t.hasAttribute("data-server")) {
+      tkSave(st);
+      tkLinks(t, st);
+      clearTimeout(tkTimer);
+      tkTimer = setTimeout(function () { tkReload(t, st); }, soon ? 0 : 300);
+    } else {
+      tkSave(st);
+      tkApply(t, st);
+    }
+  }
+
+  function tkSort(t, key) {
+    var st = tkRead(t), th = t.querySelector('thead th[data-key="' + key + '"]');
+    if (!th) return;
+    st.dir = key === st.sort ? (st.dir === "asc" ? "desc" : "asc") : tkFirstDir(th);
+    st.sort = key;
+    tkSet(t, st, true);
+  }
+
+  document.addEventListener("input", function (e) {
+    var inp = e.target;
+    if (!inp.classList || !inp.classList.contains("tkf")) return;
+    var t = inp.closest("[data-tk]");
+    if (!t) return;
+    var st = tkRead(t);
+    st.q = inp.value.trim();
+    tkSet(t, st, false);
+  });
+  document.addEventListener("submit", function (e) {
+    if (e.target.classList && e.target.classList.contains("tkq")) e.preventDefault();
+  });
+  document.addEventListener("keydown", function (e) {
+    var inp = e.target;
+    if (e.key === "Escape" && inp.classList && inp.classList.contains("tkf") && inp.value) {
+      inp.value = "";
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  // A click on a row opens the detail page (the name is also a link).
+  document.addEventListener("click", function (e) {
+    var tr = e.target.closest && e.target.closest(".tkw tbody tr[data-href]");
+    if (!tr || e.target.closest("a, button, input, select, summary")) return;
+    var sel = window.getSelection && window.getSelection();
+    if (sel && String(sel).length) return;
+    var href = tr.getAttribute("data-href");
+    if (e.metaKey || e.ctrlKey || e.button === 1) window.open(href, "_blank");
+    else location.href = href;
+  });
+
+  // Apply the URL state to every table: the server did, and this keeps the
+  // page right after a live swap or a back navigation.
+  function tkInit() {
+    document.querySelectorAll("[data-tk]").forEach(function (t) {
+      if (t.hasAttribute("data-server")) { tkLinks(t, tkRead(t)); return; }
+      tkApply(t, tkRead(t));
+    });
+  }
+
   // ---------------------------------------------------------------- live
   // One EventSource (GET /api/v1/live) for the page. The server sends a hint
   // when new events are stored or a client connects or goes offline. Then the
@@ -921,15 +1102,19 @@
       var open = Array.prototype.map.call(el.querySelectorAll("details"), function (d) { return d.open; });
       nu.querySelectorAll("details").forEach(function (d, i) { if (open[i]) d.open = true; });
       hideTip(el);
+      var tw = el.querySelector(".tkw"), sy = tw ? tw.scrollTop : 0, sx = tw ? tw.scrollLeft : 0;
       var seen = {};
-      el.querySelectorAll("tr.fr[data-id], .fz[data-id]").forEach(function (x) { seen[x.getAttribute("data-id")] = 1; });
+      el.querySelectorAll("tr[data-id], .fz[data-id]").forEach(function (x) { seen[x.getAttribute("data-id")] = 1; });
       var imp = document.importNode(nu, true);
       el.replaceWith(imp);
       if (window.htmx) window.htmx.process(imp);
       markNew(imp, seen);
+      var tw2 = imp.querySelector(".tkw");
+      if (tw2) { tw2.scrollTop = sy; tw2.scrollLeft = sx; }
       if (imp.querySelector(".chart[data-chart]")) redraw = true;
     });
     if (redraw) drawAll();
+    tkInit();
     initLanes();
     fadeAll();
     agoAll();
@@ -938,7 +1123,7 @@
   // Rows and blocks that came with this update: a highlight, and a "new"
   // chip on the row for one minute.
   function markNew(root, seen) {
-    root.querySelectorAll("tr.fr[data-id]").forEach(function (tr) {
+    root.querySelectorAll("tr[data-id]").forEach(function (tr) {
       if (seen[tr.getAttribute("data-id")]) return;
       tr.classList.add("arrive");
       var td = tr.querySelector("td");
@@ -1010,6 +1195,7 @@
     showTheme(theme());
     showSide();
     drawAll();
+    tkInit();
     stepText();
     initLanes();
     fadeAll();

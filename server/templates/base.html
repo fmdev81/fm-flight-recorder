@@ -33,7 +33,7 @@
 <header class="top">
 {% block top %}{% endblock %}
 </header>
-<main class="main" id="main"><div class="wrap">
+<main class="main{% block mainclass %}{% endblock %}" id="main"><div class="wrap">
 {% block content %}{% endblock %}
 </div></main>
 <footer class="srv" id="srv" data-live>

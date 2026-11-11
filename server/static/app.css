@@ -210,8 +210,6 @@ table.t{width:100%;border-collapse:collapse;font-size:13px;line-height:18px}
 .t .k{color:var(--muted);font-family:var(--mono);font-size:12.5px}
 .t .chg{background:var(--sel)}
 .t td.w30{width:30%}.t td.w34{width:34%}.t th.w34{width:34%}.t th.w30{width:30%}
-.sortb{font:inherit;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
-.sortb[aria-pressed="true"]{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 @media (min-width:1024px){
   .tw.tall{overflow:auto;max-height:max(260px,calc(100dvh - 300px))}
   .tall .t thead{position:sticky;top:0;z-index:2}
@@ -422,3 +420,52 @@ tr.fr.arrive td{animation:rowin 8s ease-out}
   .srv{flex-wrap:nowrap;gap:12px;white-space:nowrap}
 }
 @media (max-width:420px){.srv .on .ltx{display:none}}
+
+/* Table kit (src/table.rs, templates/tk.html). The page header stays at the
+   top (it is outside the scroll area); the table scrolls in its own box with a
+   sticky header row and a sticky first column. */
+.sortb{font:inherit;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+.sortb[aria-pressed="true"]{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.tkpage .wrap{height:100%;max-width:none}
+.card.tk{display:flex;flex-direction:column;flex:1;min-height:0;padding:0;overflow:hidden}
+.tkbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.tkq{margin:0}
+.tkf{width:min(260px,100%);padding-right:8px}
+.tkn{margin-left:auto;font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.tkw{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;position:relative}
+.tkw:focus-visible{outline-offset:-2px}
+.tkt{width:100%;border-collapse:separate;border-spacing:0}
+.tkt th{position:sticky;top:0;z-index:2;background:var(--panel);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--muted);padding:0}
+.tkt th:not(:has(a)){padding:9px 12px;white-space:nowrap}
+.tkt th>a.tks{display:block;padding:9px 12px}
+.tkt th a.tks{text-decoration:none;font-weight:500;color:var(--muted);white-space:nowrap}
+.tkt th a.tks:hover{color:var(--ink);text-decoration:none}
+.tkt th[aria-sort="ascending"] a.tks,.tkt th[aria-sort="descending"] a.tks{color:var(--ink)}
+.tkt th .arr{display:inline-block;width:1.1em;margin-left:2px;font-size:9px;vertical-align:1px}
+.tkt td{padding:8px 12px;border-bottom:1px solid var(--line)}
+.tkt tbody tr:last-child td{border-bottom:0}
+.tkt tbody tr[data-href]{cursor:pointer}
+.tkt td.r,.tkt th.r,.tkt th.r a.tks{text-align:right}
+.tkt td.r{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tkt tbody tr[hidden]{display:none}
+/* The first column stays while the table scrolls sideways. */
+.tkt th:first-child,.tkt td:first-child{position:sticky;left:0;z-index:1;background:var(--panel)}
+.tkt th:first-child{z-index:3}
+.tkt tbody tr:hover td{background:var(--sunk)}
+.tkw.sx-l .tkt td:first-child,.tkw.sx-l .tkt th:first-child{box-shadow:1px 0 0 var(--line)}
+.tkt tfoot td{position:sticky;bottom:0;z-index:2;background:var(--panel);border-top:1px solid var(--line);border-bottom:0;font-weight:600}
+.tkt tfoot td:first-child{z-index:3}
+.tkt tr.flagged td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.tkt td .hb{min-width:96px}
+.tkempty{margin:0;padding:24px 16px}
+.tknote{margin:0;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.card.tk .more{padding:0 16px}
+.card.tk .more:not(:empty){padding:10px 16px;border-top:1px solid var(--line)}
+.tkt tr.arrive td{animation:rowin 8s ease-out}
+@media (max-width:559px){
+  .top{position:sticky;top:0;z-index:20}
+  .tkpage .wrap{height:auto}
+  .card.tk{flex:none}
+  .tkw{max-height:calc(100dvh - 250px);min-height:200px}
+  .tkf{width:100%}
+}

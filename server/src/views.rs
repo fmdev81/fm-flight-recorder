@@ -43,6 +43,10 @@ pub struct Params {
     /// The lanes zoom: `zoom=15m|1h|4h` or `span=LO-HI` (minutes of the day).
     pub zoom: String,
     pub span: String,
+    /// The table state of the list pages: `sort=KEY&dir=asc|desc&q=TEXT`.
+    pub sort: String,
+    pub dir: String,
+    pub q: String,
     /// All the query parameters, sorted by name.
     pub raw: Vec<(String, String)>,
 }
@@ -69,6 +73,9 @@ impl Params {
             all_lanes: g("lanes") == "all",
             zoom: g("zoom"),
             span: g("span"),
+            sort: g("sort"),
+            dir: g("dir"),
+            q: g("q"),
             raw: {
                 let mut v: Vec<(String, String)> =
                     m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
