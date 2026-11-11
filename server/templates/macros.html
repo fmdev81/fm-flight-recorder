@@ -76,14 +76,14 @@
 
 {% macro fth(show_file) %}<thead><tr><th>Time</th><th class="r">Duration</th><th style="width: 96px">Split</th><th>Layout</th><th>From</th><th>Account</th><th>Client</th><th>Script</th>{% if show_file %}<th>File</th>{% endif %}<th class="r">Round trips</th><th class="r">Server</th></tr></thead>{% endmacro %}
 
-{% macro ftr_short(r) %}<tr class="fr{% if r.ongoing %} ongoing{% endif %}" data-id="{{ r.id }}"><td class="c-t"><a class="lite" href="{{ r.url }}" title="{{ r.t_tz }}"><time datetime="{{ r.iso }}">{{ r.t }}</time></a>{% if !r.ago.is_empty() %} <span class="ago" data-ago="{{ r.iso }}">{{ r.ago }}</span>{% endif %}</td>
-<td class="r c-d">{{ r.dur }}{% if r.ongoing %} <span class="flag ongo" title="This freeze still lasts">ongoing</span>{% endif %}</td>
+{% macro ftr_short(r) %}<tr class="fr{% if r.ongoing %} ongoing{% endif %}" data-id="{{ r.id }}"><td class="c-t"><a class="lite" href="{{ r.url }}" title="{{ r.t_tz }}"><time datetime="{{ r.iso }}">{{ r.t }}</time></a>{% if r.ongoing %} <span class="flag ongo" title="This freeze still lasts">ongoing</span>{% else if !r.ago.is_empty() %} <span class="ago" data-ago="{{ r.iso }}">{{ r.ago }}</span>{% endif %}</td>
+<td class="r c-d">{{ r.dur }}</td>
 <td class="c-s"><div class="hb" role="img" aria-label="{{ r.split_title }}" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
 <td class="c-l"><a href="{{ r.layout_url }}">{{ r.layout }}</a>{% if r.has_script %} <span class="c-sc">(<a class="lite" href="{{ r.script_url }}" title="Script: {{ r.script }}">{{ r.script }}</a>)</span>{% endif %}</td>
 <td class="c-a"><a href="{{ r.user_url }}" title="{% if !r.user.is_empty() %}{{ r.user }} · {% endif %}{{ r.client }}">{{ r.account }}</a></td></tr>{% endmacro %}
 
-{% macro ftr(r, show_file) %}<tr class="fr{% if r.ongoing %} ongoing{% endif %}" data-id="{{ r.id }}"><td class="mono c-t"><a class="lite" href="{{ r.url }}" title="{{ r.t_tz }}"><time datetime="{{ r.iso }}">{{ r.t }}</time></a>{% if !r.ago.is_empty() %} <span class="ago" data-ago="{{ r.iso }}">{{ r.ago }}</span>{% endif %}</td>
-<td class="r mono c-d">{{ r.dur }}{% if r.ongoing %} <span class="flag ongo" title="This freeze still lasts">ongoing</span>{% endif %}</td>
+{% macro ftr(r, show_file) %}<tr class="fr{% if r.ongoing %} ongoing{% endif %}" data-id="{{ r.id }}"><td class="mono c-t"><a class="lite" href="{{ r.url }}" title="{{ r.t_tz }}"><time datetime="{{ r.iso }}">{{ r.t }}</time></a>{% if r.ongoing %} <span class="flag ongo" title="This freeze still lasts">ongoing</span>{% else if !r.ago.is_empty() %} <span class="ago" data-ago="{{ r.iso }}">{{ r.ago }}</span>{% endif %}</td>
+<td class="r mono c-d">{{ r.dur }}</td>
 <td class="c-s"><div class="hb" role="img" aria-label="{{ r.split_title }}" title="{{ r.split_title }}"><div class="hs" style="width: {{ r.srv_w }}"></div><div class="hc" style="width: {{ r.cli_w }}"></div></div></td>
 <td class="c-l"><a href="{{ r.layout_url }}">{{ r.layout }}</a></td>
 <td class="muted c-x">{{ r.from }}</td>

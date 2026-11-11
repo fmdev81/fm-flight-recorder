@@ -378,6 +378,7 @@ table.t{width:100%;border-collapse:collapse;font-size:13px;line-height:18px}
 tr.fr.arrive td{animation:rowin 8s ease-out}
 /* A freeze that still lasts: its row and its timeline block pulse until the final event. */
 tr.ongoing .flag,.ongo{color:#fff;background:var(--rec);animation:ongo 1.2s ease-in-out infinite}
+.ongo{margin-left:6px}
 tr.ongoing td:first-child{box-shadow:inset 3px 0 0 var(--rec)}
 .fz.ongoing{outline:2px solid var(--rec);outline-offset:3px;z-index:6;animation:fzpulse 1.2s ease-out infinite}
 @keyframes ongo{0%,100%{opacity:1}50%{opacity:.45}}
