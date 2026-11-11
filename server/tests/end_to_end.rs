@@ -572,14 +572,30 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
         assert!(fig.contains(z), "{z}");
     }
     assert!(fig.contains(">Day</a>"));
-    // Day view: block width grows with duration, not to time scale.
+    // Day view: short freezes are drawn wider; Reset is there but hidden
+    // (the header does not change its size with the range).
     assert!(!fig.contains("lanes scaled"));
+    assert!(fig.contains("class=\"btn zreset off\""));
+    assert!(fig.contains("short freezes drawn wider"));
+    // The navigator: the day window with a mini plot and the range window.
+    assert!(fig.contains("data-nav"));
+    assert!(fig.contains("<rect "));
+    assert!(fig.contains("class=\"nwin\""));
+    assert!(fig.contains("role=\"slider\""));
+    // Blocks and sessions carry their minutes, for the layout in app.js.
+    assert!(fig.contains("data-m=\"") && fig.contains("data-dm=\"") && fig.contains("data-gw=\""));
+    assert!(fig.contains("data-a=\""));
+    // No drag-to-zoom hint on the lanes.
+    assert!(!fig.contains("Drag across the lanes"));
     // Last 15 min: to time scale, with a reset link and the window label.
     let p15 = get(&base, "/?range=today&zoom=15m").body;
     let f15 = &p15[p15.find("<figure class=\"card lanes").unwrap()..p15.find("</figure>").unwrap()];
     assert!(f15.contains(" scaled\""));
-    assert!(f15.contains("Reset zoom"));
-    assert!(f15.contains("aria-pressed=\"true\" data-zoom>15 min"));
+    assert!(f15.contains("class=\"btn zreset\""));
+    assert!(f15.contains("aria-pressed=\"true\" data-zoom data-preset=\"15 min\">15 min"));
+    // It ends at now: the label says that it follows now.
+    assert!(f15.contains("<span class=\"zfol\"> · follows now"));
+    assert!(f15.contains("<span class=\"zspan\">15 min</span>"));
     assert!(f15.contains("Positions and widths to time scale"));
     // The live fragment keeps the zoom.
     let hx = f15
@@ -594,6 +610,22 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     let ps = get(&base, "/?range=7d&span=600-630").body;
     assert!(ps.contains("10:00–10:30"));
     assert!(ps.contains(">10:05</span>") || ps.contains(">10:10</span>"));
+    // A range that ends at now, from the navigator: zoom=37.5m.
+    let pl = get(&base, "/?range=today&zoom=37.5m").body;
+    assert!(pl.contains("data-follow=\"37.5\""));
+    assert!(pl.contains("<span class=\"zspan\">37 min 30 s</span>") || pl.contains("<span class=\"zspan\">38 min</span>"));
+    // A range away from now: the presets keep its center (no jump to now).
+    let now_m = {
+        let p = get(&base, "/?range=today").body;
+        let i = p.find("data-nowm=\"").unwrap() + 11;
+        p[i..].split('"').next().unwrap().parse::<f64>().unwrap()
+    };
+    let (a, b) = if now_m >= 720.0 { (60.0, 120.0) } else { (1300.0, 1360.0) };
+    let pa = get(&base, &format!("/?range=today&span={a}-{b}")).body;
+    let c = (a + b) / 2.0;
+    assert!(pa.contains(&format!("span={:.2}-{:.2}", c - 7.5, c + 7.5)), "15 min keeps the center");
+    assert!(pa.contains(&format!("span={:.2}-{:.2}", c - 30.0, c + 30.0)), "1 h keeps the center");
+    assert!(pa.contains("<span class=\"zfol\" hidden>"));
     // A bad span is the day view.
     assert_eq!(get(&base, "/?span=x-y").status, 200);
 }
