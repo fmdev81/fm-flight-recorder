@@ -20,6 +20,7 @@ pub mod recorder;
 pub mod runloop;
 pub mod sender;
 pub mod spool;
+pub mod startopts;
 pub mod wire;
 
 #[cfg(feature = "fmx")]

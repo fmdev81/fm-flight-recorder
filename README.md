@@ -59,6 +59,16 @@ The full steps are in [Install the plug-in](https://github.com/solutionscay/fm-f
    FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>" )
    ```
 
+## Saved options
+
+The plug-in starts when FileMaker Pro starts. It uses the options of the last `FlightRecorder_Start` call that had an `endpoint=`:
+
+- A `FlightRecorder_Start` call with `endpoint=` saves its options to `~/Library/Application Support/FlightRecorder/start-options` (mode 0600, because the file holds the token). Run it one time. The plug-in then sends after each start of FileMaker Pro.
+- Without a saved file, the plug-in records to the local log only, and does not send.
+- A call with no `endpoint=` does not change the saved file.
+- A call with the same options as the running session keeps that session. It does not start a new session.
+- To delete the saved options, run `FlightRecorder_Stop ( "forget" )`. The recorder stops. At the next start of FileMaker Pro, the plug-in records but does not send.
+
 ## Documentation
 
 The documentation is in the [wiki](https://github.com/solutionscay/fm-flight-recorder/wiki):
