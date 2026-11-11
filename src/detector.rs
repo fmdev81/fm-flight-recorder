@@ -132,6 +132,48 @@ impl BusySpan {
     }
 }
 
+/// Second check of "the run loop sleeps". The run loop reports
+/// BeforeWaiting, but code can still run after that in the same observer
+/// pass. If `waiting` has been true for `threshold` and the main thread is
+/// still busy at 2 polls in a row (with no new beat), the thread does not
+/// sleep: [`SleepCheck::waiting`] then returns false, so the
+/// [`StallDetector`] sees the gap as a freeze.
+///
+/// Two polls, not one: after a real sleep, the thread is busy for a few
+/// microseconds before its AfterWaiting beat. One read in that window must
+/// not turn a long idle time into a freeze.
+#[derive(Debug, Clone, Default)]
+pub struct SleepCheck {
+    streak: u32,
+    beat_ns: u64,
+}
+
+impl SleepCheck {
+    /// The `waiting` value that the detector must use for this sample.
+    /// `thread_busy` is called only when `s.waiting` has lasted `threshold`.
+    pub fn waiting(
+        &mut self,
+        s: Sample,
+        threshold_ns: u64,
+        thread_busy: impl FnOnce() -> bool,
+    ) -> bool {
+        if !s.waiting || s.now_ns.saturating_sub(s.last_beat_ns) < threshold_ns {
+            self.streak = 0;
+            return s.waiting;
+        }
+        if s.last_beat_ns != self.beat_ns {
+            self.beat_ns = s.last_beat_ns;
+            self.streak = 0;
+        }
+        if thread_busy() {
+            self.streak = self.streak.saturating_add(1);
+        } else {
+            self.streak = 0;
+        }
+        self.streak < 2
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +290,65 @@ mod tests {
         assert_eq!(b.on_level(30, true), None);
         assert_eq!(b.on_level(90, false), Some((20, 90)));
         assert_eq!(b.on_level(95, false), None);
+    }
+    fn sw(now_ms: u64, beat_ms: u64) -> Sample {
+        s(now_ms, beat_ms, true)
+    }
+
+    #[test]
+    fn sleep_check_trusts_a_real_sleep() {
+        let mut c = SleepCheck::default();
+        for t in (1_000..5_000).step_by(10) {
+            assert!(c.waiting(sw(t, 1_000), 250 * MS, || false));
+        }
+    }
+
+    #[test]
+    fn sleep_check_does_not_ask_before_the_threshold() {
+        let mut c = SleepCheck::default();
+        assert!(c.waiting(sw(1_100, 1_000), 250 * MS, || panic!("asked")));
+        assert!(!c.waiting(s(1_100, 1_000, false), 250 * MS, || panic!("asked")));
+    }
+
+    #[test]
+    fn sleep_check_needs_two_busy_polls() {
+        let mut c = SleepCheck::default();
+        // One busy read (a wake before AfterWaiting): still waiting.
+        assert!(c.waiting(sw(1_300, 1_000), 250 * MS, || true));
+        assert!(c.waiting(sw(1_310, 1_000), 250 * MS, || false));
+        // Two in a row: not waiting.
+        assert!(c.waiting(sw(1_320, 1_000), 250 * MS, || true));
+        assert!(!c.waiting(sw(1_330, 1_000), 250 * MS, || true));
+        // A new beat starts a new count.
+        assert!(c.waiting(sw(1_600, 1_340), 250 * MS, || true));
+    }
+
+    #[test]
+    fn busy_in_the_before_waiting_pass_is_a_freeze() {
+        // Beat + "waiting" at 1_000, then the thread works for 800 ms in the
+        // same observer pass, then really sleeps (not busy) at 1_800.
+        let mut d = StallDetector::new(250);
+        let mut c = SleepCheck::default();
+        let mut got = Vec::new();
+        for t in (1_000..2_200).step_by(10) {
+            let busy = t < 1_800;
+            let raw = sw(t, 1_000);
+            let w = c.waiting(raw, 250 * MS, || busy);
+            if let Some(tr) = d.observe(Sample { waiting: w, ..raw }) {
+                got.push(tr);
+            }
+        }
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(
+            got[0],
+            Transition::Started {
+                start_ns: 1_000 * MS
+            }
+        );
+        let Transition::Ended { start_ns, end_ns } = got[1] else {
+            panic!("{got:?}")
+        };
+        assert_eq!(start_ns, 1_000 * MS);
+        assert_eq!(end_ns, 1_800 * MS);
     }
 }

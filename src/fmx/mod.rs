@@ -184,8 +184,11 @@ fn start(options: &str) -> String {
         cfg.clone(),
         crate::default_probe(cfg.net_port),
     ));
-    let r2 = rec.clone();
     // We are on the main thread (Init or an external function call).
+    // The watchdog checks that this thread really sleeps when the run loop
+    // says "waiting" (a stall can follow BeforeWaiting in the same pass).
+    rec.watch_current_thread();
+    let r2 = rec.clone();
     let observer = unsafe {
         RunLoopObserver::install(runloop::CFRunLoopGetMain(), move |a| runloop::feed(&r2, a))
     };

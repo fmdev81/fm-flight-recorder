@@ -17,13 +17,13 @@
 //! and counted, and FileMaker never waits.
 
 use crate::context::{CaptureGate, Context};
-use crate::detector::{BusySpan, Sample, StallDetector, Transition};
+use crate::detector::{BusySpan, Sample, SleepCheck, StallDetector, Transition};
 use crate::eventlog::{iso_from_unix_ms, Event, LogWriter, SCHEMA_VERSION};
 use crate::net::{NetHistory, NetProbe};
 use crate::wire::{ClientInfo, EventLine};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::*};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering::*};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -371,6 +371,9 @@ impl Config {
 struct Shared {
     last_beat_ns: AtomicU64,
     waiting: AtomicBool,
+    /// Mach port of the main thread, for the watchdog's sleep check
+    /// ([`SleepCheck`]). 0 = no check (only the run loop's word).
+    main_thread: AtomicU32,
     level: AtomicU8,
     beats: AtomicU64,
     /// Heartbeats that came from kFMXT_Idle (not from the run loop).
@@ -500,6 +503,7 @@ impl Recorder {
         let shared = Arc::new(Shared {
             last_beat_ns: AtomicU64::new(0),
             waiting: AtomicBool::new(false),
+            main_thread: AtomicU32::new(0),
             level: AtomicU8::new(Level::UserNotIdle as u8),
             beats: AtomicU64::new(0),
             idle_msgs: AtomicU64::new(0),
@@ -699,6 +703,15 @@ impl Recorder {
             self.shared.last_beat_ns.store(mono_ns(), Release);
         }
         self.shared.waiting.store(waiting, Release);
+    }
+
+    /// Watch the calling thread (call it on the main thread, after start).
+    /// Then the watchdog does not trust "waiting" for longer than the
+    /// threshold if the thread still runs: see [`SleepCheck`].
+    #[cfg(target_os = "macos")]
+    pub fn watch_current_thread(&self) {
+        let port = crate::machthread::ThreadWatch::current().port();
+        self.shared.main_thread.store(port, Release);
     }
 
     /// Should the glue read Get() values now? Call at a safe idle.
@@ -940,6 +953,19 @@ fn send_or_count(tx: &SyncSender<Event>, e: Event, s: &Shared) {
     }
 }
 
+/// Is the watched main thread on a CPU (not asleep)? Unknown = no.
+fn main_thread_busy(port: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::machthread::ThreadWatch::from_port(port).is_busy() == Some(true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = port;
+        false
+    }
+}
+
 fn watchdog(
     cfg: Config,
     s: Arc<Shared>,
@@ -949,6 +975,7 @@ fn watchdog(
     clock: Clock,
 ) {
     let mut det = StallDetector::new(cfg.threshold_ms);
+    let mut sleep_check = SleepCheck::default();
     let mut busy = BusySpan::default();
     let mut busy_ctx = Context::default();
     let poll = Duration::from_millis(cfg.poll_ms.max(1));
@@ -964,11 +991,15 @@ fn watchdog(
         thread::sleep(poll);
         let now = mono_ns();
         let level = Level::from_u8(s.level.load(Relaxed));
-        let sample = Sample {
+        let mut sample = Sample {
             now_ns: now,
             last_beat_ns: s.last_beat_ns.load(Acquire),
             waiting: s.waiting.load(Acquire),
         };
+        let port = s.main_thread.load(Acquire);
+        if port != 0 {
+            sample.waiting = sleep_check.waiting(sample, threshold_ns, || main_thread_busy(port));
+        }
 
         match det.observe(sample) {
             Some(Transition::Started { start_ns }) => {
@@ -1356,5 +1387,60 @@ mod tests {
         assert!(Level::ScriptRunning.safe_for_calls(true));
         assert!(!Level::Unsafe.safe_for_calls(true));
         assert_eq!(Level::from_u8(3), Level::ScriptRunning);
+    }
+    /// The run loop said "waiting", but the thread works (an observer after
+    /// ours in the BeforeWaiting pass). With the thread watch: a freeze.
+    /// Without it: none (the old behavior).
+    #[cfg(target_os = "macos")]
+    fn busy_while_waiting(watch: bool, busy: bool) -> u64 {
+        let dir = std::env::temp_dir().join(format!(
+            "fr-watch-{watch}-{busy}-{}-{}",
+            std::process::id(),
+            crate::identity::random_id()
+        ));
+        let rec = Recorder::start(
+            Config {
+                log_dir: dir.clone(),
+                state_dir: dir.join("state"),
+                net_port: None,
+                ..Default::default()
+            },
+            Box::new(crate::net::NoProbe),
+        );
+        if watch {
+            rec.watch_current_thread();
+        }
+        for _ in 0..10 {
+            rec.beat(Level::RunLoop);
+            thread::sleep(Duration::from_millis(5));
+        }
+        rec.beat(Level::RunLoop);
+        rec.set_waiting(true);
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(700) {
+            if busy {
+                std::hint::spin_loop();
+            } else {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        rec.set_waiting(false);
+        rec.beat(Level::RunLoop);
+        thread::sleep(Duration::from_millis(100));
+        let n = rec.stop().freezes;
+        let _ = std::fs::remove_dir_all(&dir);
+        n
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn watchdog_sees_work_after_before_waiting() {
+        assert_eq!(busy_while_waiting(true, true), 1, "watched, busy");
+        assert_eq!(
+            busy_while_waiting(false, true),
+            0,
+            "not watched: old behavior"
+        );
+        assert_eq!(busy_while_waiting(true, false), 0, "watched, really asleep");
     }
 }
