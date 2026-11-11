@@ -550,15 +550,21 @@ fn overview_is_calm() {
     let sessions = fake::generate(&o, app.zone);
     fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
     let page = get(&base, "/").body;
-    // Latest freezes: time, duration, layout, account; 8 rows at most.
+    // Latest freezes: time, duration with the split bar, layout, account;
+    // 8 rows at most.
     let latest = page.find("id=\"ov-latest\"").unwrap();
     let part = &page[latest..latest + page[latest..].find("</table>").unwrap()];
-    assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th>Layout</th><th>Account</th></tr>"));
-    for gone in ["<th>From</th>", "Split</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
+    assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th><span class=\"vh\">Server and client split</span></th><th>Layout</th><th>Account</th></tr>"));
+    for gone in ["<th>From</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
         assert!(!part.contains(gone), "{gone}");
     }
     let rows = part.matches("<tr class=\"fr\"").count();
     assert!(rows > 0 && rows <= 8, "{rows}");
+    // Each row has the split bar, with the seconds in its tooltip.
+    assert_eq!(part.matches("<td class=\"c-s\"><div class=\"hb\" role=\"img\"").count(), rows);
+    assert!(part.contains("<div class=\"hs\" style=\"width: ") && part.contains("<div class=\"hc\" style=\"width: "));
+    let tip = part.split("class=\"hb\" role=\"img\" aria-label=\"").nth(1).unwrap().split('"').next().unwrap();
+    assert!(tip.starts_with("Server ") && tip.contains(" · Client "), "{tip}");
     // The Freezes page keeps all columns.
     let fz = get(&base, "/freezes").body;
     for kept in ["<th>From</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
