@@ -17,7 +17,7 @@
 //! and counted, and FileMaker never waits.
 
 use crate::context::{CaptureGate, Context};
-use crate::detector::{BusySpan, Sample, SleepCheck, StallDetector, Transition};
+use crate::detector::{BusySpan, JoinOut, Joiner, Sample, SleepCheck, StallDetector, Transition};
 use crate::eventlog::{iso_from_unix_ms, Event, LogWriter, SCHEMA_VERSION};
 use crate::net::{NetHistory, NetProbe};
 use crate::wire::{ClientInfo, EventLine};
@@ -96,6 +96,12 @@ pub struct Config {
     pub app: String,
     /// How long a freeze waits for its "after" context before it is written.
     pub after_wait_ms: u64,
+    /// Join two parts of a freeze when the second starts at most this long
+    /// after the first ends, with no real sleep between (`join_ms=`).
+    pub join_ms: u64,
+    /// Send a `freeze_progress` event this often while a freeze lasts
+    /// (`progress_ms=`). 0 = never.
+    pub progress_ms: u64,
     /// Companion server (`endpoint=http://host:8787`). None = do not send.
     pub endpoint: Option<Endpoint>,
     /// Event token (`token=`). Never shown in Status.
@@ -239,6 +245,8 @@ impl Default for Config {
             heartbeat: "idle".into(),
             app: String::new(),
             after_wait_ms: 1500,
+            join_ms: 50,
+            progress_ms: 1000,
             endpoint: None,
             token: String::new(),
             client: String::new(),
@@ -302,6 +310,14 @@ impl Config {
                 "threshold" | "threshold_ms" => v
                     .parse::<u64>()
                     .map(|n| self.threshold_ms = n.clamp(20, 600_000))
+                    .is_ok(),
+                "join_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.join_ms = n.min(1_000))
+                    .is_ok(),
+                "progress_ms" => v
+                    .parse::<u64>()
+                    .map(|n| self.progress_ms = if n == 0 { 0 } else { n.clamp(250, 60_000) })
                     .is_ok(),
                 "port" => v
                     .parse::<u16>()
@@ -398,6 +414,8 @@ struct Pending {
 
 struct Inner {
     last_context: Context,
+    /// Monotonic ns when `last_context` came (0 = never).
+    last_context_ns: u64,
     gate: CaptureGate,
     marks: Vec<(u64, String)>,
     pending: Vec<Pending>,
@@ -488,6 +506,8 @@ pub struct Recorder {
     inner: Arc<Mutex<Inner>>,
     tx: Mutex<Option<SyncSender<Event>>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
+    /// Joined first at stop, so its last freeze comes before session_stop.
+    watchdog: Mutex<Option<JoinHandle<()>>>,
     clock: Clock,
     writer_dir: PathBuf,
     session_id: String,
@@ -517,6 +537,7 @@ impl Recorder {
         });
         let inner = Arc::new(Mutex::new(Inner {
             last_context: Context::default(),
+            last_context_ns: 0,
             gate: CaptureGate::new(cfg.context_interval_ms),
             marks: Vec::new(),
             pending: Vec::new(),
@@ -524,6 +545,7 @@ impl Recorder {
         let net = Arc::new(Mutex::new(NetHistory::new(120)));
         let (tx, rx) = sync_channel::<Event>(EVENT_QUEUE_MAX);
         let mut threads = Vec::new();
+        let watchdog_thread;
 
         // Writer.
         let session_id = crate::identity::random_id();
@@ -617,7 +639,7 @@ impl Recorder {
                 tx.clone(),
                 cfg.clone(),
             );
-            threads.push(
+            watchdog_thread = Some(
                 thread::Builder::new()
                     .name("fr-watchdog".into())
                     .spawn(move || watchdog(cfg2, s, inner, net, tx, clock))
@@ -647,6 +669,7 @@ impl Recorder {
             inner,
             tx: Mutex::new(Some(tx)),
             threads: Mutex::new(threads),
+            watchdog: Mutex::new(watchdog_thread),
             clock,
             writer_dir,
             session_id,
@@ -737,6 +760,7 @@ impl Recorder {
                 ready.push(p.event);
             }
             i.last_context = ctx.clone();
+            i.last_context_ns = mono_ns();
         }
         for mut e in ready {
             if let Event::Freeze { after, .. } = &mut e {
@@ -756,6 +780,7 @@ impl Recorder {
             i.marks.drain(..excess);
             if !ctx.is_empty() {
                 i.last_context = ctx.clone();
+                i.last_context_ns = mono_ns();
             }
         }
         self.send(Event::Mark {
@@ -841,6 +866,18 @@ impl Recorder {
         if !self.shared.running.swap(false, AcqRel) {
             return;
         }
+        // No network work at stop: from here the sender does not post; the
+        // writer puts the unsent events in the spool (local disk, like the
+        // log).
+        let t0 = Instant::now();
+        if let Some(s) = &self.sender {
+            s.signal_stop();
+        }
+        // The watchdog closes its last freeze (into `pending`) as it exits,
+        // so that freeze comes before session_stop.
+        if let Some(t) = self.watchdog.lock().unwrap().take() {
+            let _ = t.join();
+        }
         let pending: Vec<Event> = self
             .inner
             .lock()
@@ -855,13 +892,6 @@ impl Recorder {
             heartbeats: self.shared.beats.load(Relaxed),
             idle_messages: self.shared.idle_msgs.load(Relaxed),
         });
-        // The sender must not post any more: no network work at stop. Its
-        // socket is closed now; the writer puts the unsent events in the
-        // spool (local disk, like the log).
-        let t0 = Instant::now();
-        if let Some(s) = &self.sender {
-            s.signal_stop();
-        }
         // The watchdog holds a Sender clone; it exits on `running == false`.
         *self.tx.lock().unwrap() = None;
         let threads: Vec<_> = self.threads.lock().unwrap().drain(..).collect();
@@ -986,6 +1016,8 @@ fn watchdog(
     // is the "before" context even if the main thread offers a new one
     // before we see the stall end.
     let mut ctx_before_stall = Context::default();
+    let mut start_ts = String::new();
+    let mut joiner = Joiner::new(cfg.join_ms, cfg.threshold_ms, cfg.poll_ms, cfg.progress_ms);
 
     while s.running.load(Acquire) {
         thread::sleep(poll);
@@ -1001,55 +1033,64 @@ fn watchdog(
             sample.waiting = sleep_check.waiting(sample, threshold_ns, || main_thread_busy(port));
         }
 
-        match det.observe(sample) {
-            Some(Transition::Started { start_ns }) => {
-                level_before_stall = level;
-                ctx_before_stall = inner
-                    .lock()
-                    .map(|i| i.last_context.clone())
-                    .unwrap_or_default();
-                s.stall_since_ns.store(start_ns, Release);
-            }
-            Some(Transition::Ended { start_ns, end_ns }) => {
-                s.stall_since_ns.store(0, Release);
-                s.freezes.fetch_add(1, Relaxed);
-                // The sampler can lag the heartbeat by one interval: the last
-                // reply may land just after `end_ns`. Wait, then count a little
-                // past the end.
-                let grace_ns = (cfg.net_sample_ms * 3 + 2) * 1_000_000;
-                let wait = (end_ns + grace_ns).saturating_sub(mono_ns());
-                if wait > 0 {
-                    thread::sleep(Duration::from_nanos(wait));
-                }
-                let netw = net
-                    .lock()
-                    .map(|n| n.window(start_ns, end_ns + grace_ns))
-                    .unwrap_or_default();
-                let mut i = inner.lock().unwrap();
-                let marks = i
-                    .marks
-                    .iter()
-                    .filter(|(t, _)| *t + 1_000_000_000 >= start_ns && *t <= end_ns)
-                    .map(|(_, l)| l.clone())
-                    .collect();
-                let ev = Event::Freeze {
-                    ts: clock.iso(start_ns),
-                    end_ts: clock.iso(end_ns),
-                    duration_ms: (end_ns - start_ns) / 1_000_000,
-                    level: level_before_stall.name().into(),
-                    before: std::mem::take(&mut ctx_before_stall),
-                    after: None,
-                    net: netw,
-                    marks,
-                };
-                i.pending.push(Pending {
-                    event: ev,
-                    deadline_ns: now + cfg.after_wait_ms * 1_000_000,
-                });
+        let slept = sample.waiting;
+        let transition = det.observe(sample);
+        if matches!(transition, Some(Transition::Ended { .. })) {
+            // A part ended: ask for the context now. If no new part joins,
+            // it is the "after" context of the freeze.
+            if let Ok(mut i) = inner.lock() {
                 i.gate.reset();
-                s.want_context.store(true, Release);
             }
-            None => {}
+            s.want_context.store(true, Release);
+        }
+        for out in joiner.step(now, transition, slept) {
+            match out {
+                JoinOut::Open { start_ns, .. } => {
+                    level_before_stall = level;
+                    ctx_before_stall = inner
+                        .lock()
+                        .map(|i| i.last_context.clone())
+                        .unwrap_or_default();
+                    // One text for the start: the progress events and the
+                    // final freeze must have the same `ts`.
+                    start_ts = clock.iso(start_ns);
+                    s.stall_since_ns.store(start_ns, Release);
+                }
+                JoinOut::Progress {
+                    id,
+                    start_ns,
+                    now_ns,
+                    parts,
+                } => send_or_count(
+                    &tx,
+                    Event::FreezeProgress {
+                        ts: start_ts.clone(),
+                        now_ts: clock.iso(now_ns),
+                        id,
+                        duration_ms: now_ns.saturating_sub(start_ns) / 1_000_000,
+                        level: level_before_stall.name().into(),
+                        before: ctx_before_stall.clone(),
+                        parts,
+                    },
+                    &s,
+                ),
+                JoinOut::Close {
+                    start_ns, end_ns, ..
+                } => {
+                    s.stall_since_ns.store(0, Release);
+                    let ev = final_freeze(
+                        &cfg,
+                        &inner,
+                        &net,
+                        std::mem::take(&mut start_ts),
+                        &clock,
+                        (start_ns, end_ns),
+                        level_before_stall,
+                        std::mem::take(&mut ctx_before_stall),
+                    );
+                    close_freeze(&cfg, &inner, &s, &tx, ev, end_ns);
+                }
+            }
         }
 
         // Pending freezes that never got an "after" context.
@@ -1085,6 +1126,104 @@ fn watchdog(
                 );
             }
         }
+    }
+    // At stop: a freeze whose last part ended but did not settle yet. The
+    // "after" queue is already flushed, so send it now.
+    if let Some(JoinOut::Close {
+        start_ns, end_ns, ..
+    }) = joiner.flush()
+    {
+        let ev = final_freeze(
+            &cfg,
+            &inner,
+            &net,
+            start_ts,
+            &clock,
+            (start_ns, end_ns),
+            level_before_stall,
+            ctx_before_stall,
+        );
+        close_freeze(&cfg, &inner, &s, &tx, ev, end_ns);
+    }
+}
+
+/// Send a closed freeze with its "after" context: a context that came
+/// after `end_ns` if there is one, else the next one (or none after
+/// `after_wait_ms`).
+fn close_freeze(
+    cfg: &Config,
+    inner: &Mutex<Inner>,
+    s: &Shared,
+    tx: &SyncSender<Event>,
+    mut ev: Event,
+    end_ns: u64,
+) {
+    s.freezes.fetch_add(1, Relaxed);
+    let mut i = inner.lock().unwrap();
+    if i.last_context_ns >= end_ns && !i.last_context.is_empty() {
+        if let Event::Freeze { after, .. } = &mut ev {
+            *after = Some(i.last_context.clone());
+        }
+        drop(i);
+        send_or_count(tx, ev, s);
+        return;
+    }
+    i.pending.push(Pending {
+        event: ev,
+        deadline_ns: mono_ns() + cfg.after_wait_ms * 1_000_000,
+    });
+    i.gate.reset();
+    drop(i);
+    s.want_context.store(true, Release);
+}
+
+/// The final `freeze` event of a (joined) freeze. `ts` is the start text
+/// that the progress events used ("" if none: made from `start_ns`).
+#[allow(clippy::too_many_arguments)]
+fn final_freeze(
+    cfg: &Config,
+    inner: &Mutex<Inner>,
+    net: &Mutex<NetHistory>,
+    ts: String,
+    clock: &Clock,
+    (start_ns, end_ns): (u64, u64),
+    level: Level,
+    before: Context,
+) -> Event {
+    // The sampler can lag the heartbeat by one interval: the last reply may
+    // land just after `end_ns`. Wait, then count a little past the end.
+    let grace_ns = (cfg.net_sample_ms * 3 + 2) * 1_000_000;
+    let wait = (end_ns + grace_ns).saturating_sub(mono_ns());
+    if wait > 0 {
+        thread::sleep(Duration::from_nanos(wait));
+    }
+    let netw = net
+        .lock()
+        .map(|n| n.window(start_ns, end_ns + grace_ns))
+        .unwrap_or_default();
+    let marks = inner
+        .lock()
+        .map(|i| {
+            i.marks
+                .iter()
+                .filter(|(t, _)| *t + 1_000_000_000 >= start_ns && *t <= end_ns)
+                .map(|(_, l)| l.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    Event::Freeze {
+        ts: if ts.is_empty() {
+            clock.iso(start_ns)
+        } else {
+            ts
+        },
+        end_ts: clock.iso(end_ns),
+        duration_ms: (end_ns - start_ns) / 1_000_000,
+        level: level.name().into(),
+        before,
+        after: None,
+        net: netw,
+        marks,
     }
 }
 
@@ -1442,5 +1581,67 @@ mod tests {
             "not watched: old behavior"
         );
         assert_eq!(busy_while_waiting(true, false), 0, "watched, really asleep");
+    }
+    /// One long wait in which the main thread runs the run loop once a
+    /// second (one beat): one freeze in the log, with progress events before
+    /// it that have the same `ts` and id 1.
+    #[test]
+    fn a_wait_with_short_pumps_is_one_freeze_with_progress() {
+        let dir = std::env::temp_dir().join(format!(
+            "fr-join-{}-{}",
+            std::process::id(),
+            crate::identity::random_id()
+        ));
+        let rec = Recorder::start(
+            Config {
+                log_dir: dir.clone(),
+                state_dir: dir.join("state"),
+                net_port: None,
+                ..Default::default()
+            },
+            Box::new(crate::net::NoProbe),
+        );
+        let beats = |ms: u64| {
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_millis(ms) {
+                rec.beat(Level::RunLoop);
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        beats(200);
+        for _ in 0..3 {
+            thread::sleep(Duration::from_millis(1_000));
+            rec.beat(Level::RunLoop);
+        }
+        thread::sleep(Duration::from_millis(1_000));
+        beats(800);
+        let st = rec.stop();
+        assert_eq!(st.freezes, 1, "{st:?}");
+        let text = std::fs::read_to_string(&st.log).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let of = |t: &str| -> Vec<&serde_json::Value> {
+            lines.iter().filter(|v| v["type"] == t).collect()
+        };
+        let freezes = of("freeze");
+        assert_eq!(freezes.len(), 1, "{text}");
+        let d = freezes[0]["duration_ms"].as_u64().unwrap();
+        assert!((3_900..4_400).contains(&d), "duration {d}");
+        let progress = of("freeze_progress");
+        assert!(progress.len() >= 2, "{text}");
+        for p in &progress {
+            assert_eq!(p["id"], 1);
+            assert_eq!(p["ts"], freezes[0]["ts"], "same start text");
+        }
+        let durs: Vec<u64> = progress
+            .iter()
+            .map(|p| p["duration_ms"].as_u64().unwrap())
+            .collect();
+        assert!(durs.windows(2).all(|w| w[1] > w[0]), "{durs:?}");
+        let parts = progress.last().unwrap()["parts"].as_u64().unwrap();
+        assert!(parts >= 3, "parts {parts}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

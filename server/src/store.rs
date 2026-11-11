@@ -160,7 +160,13 @@ pub fn to_row(i: usize, v: &Value, session_id: &str, fallback_ms: i64) -> Result
         Event::SessionStart { ts: t, .. }
         | Event::SessionStop { ts: t, .. }
         | Event::Mark { ts: t, .. } => row.ts_ms = ts(t)?,
-        Event::Freeze { ts: t, end_ts, .. } | Event::ScriptBusy { ts: t, end_ts, .. } => {
+        Event::Freeze { ts: t, end_ts, .. }
+        | Event::ScriptBusy { ts: t, end_ts, .. }
+        | Event::FreezeProgress {
+            ts: t,
+            now_ts: end_ts,
+            ..
+        } => {
             row.ts_ms = ts(t)?;
             row.end_ms = Some(ts(end_ts)?);
         }

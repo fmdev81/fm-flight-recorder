@@ -174,6 +174,155 @@ impl SleepCheck {
     }
 }
 
+/// What [`Joiner::step`] asks the watchdog to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinOut {
+    /// A new freeze starts (its first part). Read its "before" context now.
+    Open { id: u64, start_ns: u64 },
+    /// The freeze still lasts: send a progress update.
+    Progress {
+        id: u64,
+        start_ns: u64,
+        now_ns: u64,
+        parts: u32,
+    },
+    /// The freeze is over: send the final freeze event.
+    Close {
+        id: u64,
+        start_ns: u64,
+        end_ns: u64,
+        parts: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpenFreeze {
+    id: u64,
+    start_ns: u64,
+    /// End of the last part; None while a part lasts.
+    end_ns: Option<u64>,
+    parts: u32,
+    last_progress_ns: u64,
+}
+
+/// Joins the parts of one long wait into one freeze.
+///
+/// FileMaker can run the run loop for a moment in a long operation (about
+/// once a second in a long script step). Each run is a beat, so the
+/// [`StallDetector`] sees parts of about 1 s with no gap between them. A
+/// part that starts at most `join` after the end of the last part, with no
+/// real sleep between, is the same freeze.
+///
+/// The decision comes late: a new part is known only `threshold` after it
+/// starts. So a freeze closes `join + threshold` (plus 2 polls) after its
+/// last part, or at once when the run loop really sleeps.
+#[derive(Debug, Clone)]
+pub struct Joiner {
+    join_ns: u64,
+    settle_ns: u64,
+    progress_ns: u64,
+    next_id: u64,
+    open: Option<OpenFreeze>,
+}
+
+impl Joiner {
+    /// `progress_ms` = 0: no progress updates.
+    pub fn new(join_ms: u64, threshold_ms: u64, poll_ms: u64, progress_ms: u64) -> Self {
+        Self {
+            join_ns: join_ms * 1_000_000,
+            settle_ns: (join_ms + threshold_ms + 2 * poll_ms.max(1)) * 1_000_000,
+            progress_ns: progress_ms * 1_000_000,
+            next_id: 1,
+            open: None,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    /// Feed the detector's transition (if any) of this poll. `slept` is
+    /// true when the run loop really sleeps now.
+    pub fn step(&mut self, now_ns: u64, t: Option<Transition>, slept: bool) -> Vec<JoinOut> {
+        let mut out = Vec::new();
+        match t {
+            Some(Transition::Started { start_ns }) => match &mut self.open {
+                Some(o) if o.end_ns.is_some_and(|e| start_ns <= e + self.join_ns) => {
+                    o.end_ns = None;
+                    o.parts += 1;
+                }
+                _ => {
+                    if let Some(c) = self.close() {
+                        out.push(c);
+                    }
+                    let id = self.next_id;
+                    self.next_id += 1;
+                    self.open = Some(OpenFreeze {
+                        id,
+                        start_ns,
+                        end_ns: None,
+                        parts: 1,
+                        last_progress_ns: start_ns,
+                    });
+                    out.push(JoinOut::Open { id, start_ns });
+                }
+            },
+            Some(Transition::Ended { end_ns, .. }) => {
+                if let Some(o) = &mut self.open {
+                    o.end_ns = Some(end_ns.max(o.start_ns));
+                    if slept {
+                        out.extend(self.close());
+                    }
+                }
+            }
+            None => {}
+        }
+        if let Some(o) = &mut self.open {
+            match o.end_ns {
+                Some(e) => {
+                    if now_ns >= e + self.settle_ns {
+                        out.extend(self.close());
+                    }
+                }
+                None => {
+                    if self.progress_ns > 0
+                        && now_ns.saturating_sub(o.start_ns) >= self.progress_ns
+                        && now_ns.saturating_sub(o.last_progress_ns) >= self.progress_ns
+                    {
+                        o.last_progress_ns = now_ns;
+                        out.push(JoinOut::Progress {
+                            id: o.id,
+                            start_ns: o.start_ns,
+                            now_ns,
+                            parts: o.parts,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Close the open freeze if its last part has ended (at stop).
+    pub fn flush(&mut self) -> Option<JoinOut> {
+        if self.open.is_some_and(|o| o.end_ns.is_some()) {
+            self.close()
+        } else {
+            None
+        }
+    }
+
+    fn close(&mut self) -> Option<JoinOut> {
+        let o = self.open.take()?;
+        Some(JoinOut::Close {
+            id: o.id,
+            start_ns: o.start_ns,
+            end_ns: o.end_ns.unwrap_or(o.start_ns),
+            parts: o.parts,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +499,151 @@ mod tests {
         };
         assert_eq!(start_ns, 1_000 * MS);
         assert_eq!(end_ns, 1_800 * MS);
+    }
+    /// Run the detector and the joiner on beats at `beats_ms` (and "asleep"
+    /// from `sleep_from_ms`), polling every 10 ms up to `until_ms`.
+    fn join_run(beats_ms: &[u64], sleep_from_ms: u64, until_ms: u64) -> Vec<JoinOut> {
+        let mut d = StallDetector::new(250);
+        let mut j = Joiner::new(50, 250, 10, 1000);
+        let mut out = Vec::new();
+        for t in (0..=until_ms).step_by(10) {
+            let beat = beats_ms
+                .iter()
+                .copied()
+                .filter(|b| *b <= t)
+                .max()
+                .unwrap_or(0);
+            let waiting = t >= sleep_from_ms;
+            let tr = d.observe(s(t, beat, waiting));
+            out.extend(j.step(t * MS, tr, waiting));
+        }
+        out
+    }
+
+    #[test]
+    fn parts_with_no_gap_are_one_freeze_with_progress() {
+        // Busy from 1_000 to 9_000; FileMaker pumps the run loop once a
+        // second (one beat), as in the log of 2026-11-11 16:35.
+        let mut beats: Vec<u64> = (0..=1_000).step_by(10).collect();
+        beats.extend((2_000..=9_000).step_by(1_000));
+        beats.extend((9_000..=9_400).step_by(10));
+        let out = join_run(&beats, 9_400, 10_000);
+        let opens: Vec<_> = out
+            .iter()
+            .filter(|o| matches!(o, JoinOut::Open { .. }))
+            .collect();
+        assert_eq!(
+            opens,
+            [&JoinOut::Open {
+                id: 1,
+                start_ns: 1_000 * MS
+            }]
+        );
+        let progress: Vec<u64> = out
+            .iter()
+            .filter_map(|o| match o {
+                JoinOut::Progress { id: 1, now_ns, .. } => Some(now_ns / MS),
+                _ => None,
+            })
+            .collect();
+        assert!(progress.len() >= 6, "{progress:?}");
+        assert!(
+            progress.windows(2).all(|w| w[1] - w[0] >= 1_000),
+            "{progress:?}"
+        );
+        let closes: Vec<_> = out
+            .iter()
+            .filter(|o| matches!(o, JoinOut::Close { .. }))
+            .collect();
+        assert_eq!(
+            closes,
+            [&JoinOut::Close {
+                id: 1,
+                start_ns: 1_000 * MS,
+                end_ns: 9_000 * MS,
+                parts: 8
+            }]
+        );
+    }
+
+    #[test]
+    fn a_gap_longer_than_join_makes_two_freezes() {
+        // Stall 1_000..1_500, beats every 10 ms to 1_600, stall 1_600..2_100.
+        let mut beats: Vec<u64> = (0..=1_000).step_by(10).collect();
+        beats.extend((1_500..=1_600).step_by(10));
+        beats.extend((2_100..=2_500).step_by(10));
+        let out = join_run(&beats, 10_000, 3_000);
+        let closes: Vec<_> = out
+            .iter()
+            .filter_map(|o| match o {
+                JoinOut::Close {
+                    id,
+                    start_ns,
+                    end_ns,
+                    parts,
+                } => Some((*id, start_ns / MS, end_ns / MS, *parts)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(closes, [(1, 1_000, 1_500, 1), (2, 1_600, 2_100, 1)]);
+        assert!(!out.iter().any(|o| matches!(o, JoinOut::Progress { .. })));
+    }
+
+    #[test]
+    fn a_real_sleep_closes_at_once() {
+        let beats: Vec<u64> = (0..=1_000).step_by(10).collect();
+        // Busy 1_000..1_600, then the run loop sleeps.
+        let mut d = StallDetector::new(250);
+        let mut j = Joiner::new(50, 250, 10, 1000);
+        let mut closed_at = None;
+        for t in (0..=2_000).step_by(10) {
+            let beat = beats.iter().copied().filter(|b| *b <= t).max().unwrap_or(0);
+            let waiting = t >= 1_600;
+            let tr = d.observe(s(t, beat, waiting));
+            for o in j.step(t * MS, tr, waiting) {
+                if let JoinOut::Close { end_ns, .. } = o {
+                    closed_at = Some((t, end_ns / MS));
+                }
+            }
+        }
+        assert_eq!(closed_at, Some((1_600, 1_600)));
+        assert!(!j.is_open());
+    }
+
+    #[test]
+    fn flush_closes_only_an_ended_freeze() {
+        let mut j = Joiner::new(50, 250, 10, 0);
+        let o = j.step(
+            1_250 * MS,
+            Some(Transition::Started {
+                start_ns: 1_000 * MS,
+            }),
+            false,
+        );
+        assert_eq!(
+            o,
+            [JoinOut::Open {
+                id: 1,
+                start_ns: 1_000 * MS
+            }]
+        );
+        assert_eq!(j.flush(), None, "a part still lasts");
+        j.step(
+            1_400 * MS,
+            Some(Transition::Ended {
+                start_ns: 1_000 * MS,
+                end_ns: 1_400 * MS,
+            }),
+            false,
+        );
+        assert_eq!(
+            j.flush(),
+            Some(JoinOut::Close {
+                id: 1,
+                start_ns: 1_000 * MS,
+                end_ns: 1_400 * MS,
+                parts: 1
+            })
+        );
     }
 }
