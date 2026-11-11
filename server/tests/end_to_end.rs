@@ -565,17 +565,21 @@ fn overview_is_calm() {
     // 8 rows at most.
     let latest = page.find("id=\"ov-latest\"").unwrap();
     let part = &page[latest..latest + page[latest..].find("</table>").unwrap()];
-    assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th><span class=\"vh\">Server and client split</span></th><th>Layout</th><th>Account</th></tr>"));
-    for gone in [
-        "<th>From</th>",
-        "<th>Client</th>",
-        "<th>Script</th>",
-        "Round trips",
-    ] {
+    assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th><span class=\"vh\">Server and client split</span></th><th>Layout</th><th>Script</th><th>Account</th></tr>"));
+    for gone in ["<th>From</th>", "<th>Client</th>", "Round trips"] {
         assert!(!part.contains(gone), "{gone}");
     }
     let rows = part.matches("<tr class=\"fr\"").count();
     assert!(rows > 0 && rows <= 8, "{rows}");
+    // Each row has a script cell: the script name, or empty when none ran
+    // (never "No script name" or a dash).
+    assert_eq!(part.matches("<td class=\"c-sc\">").count(), rows);
+    let with = part
+        .matches("<td class=\"c-sc\"><a class=\"lite\" href=\"/script?")
+        .count();
+    let without = part.matches("<td class=\"c-sc\"></td>").count();
+    assert_eq!(with + without, rows, "a script link or an empty cell");
+    assert!(!part.contains("No script name"));
     // Each row has the split bar, with the seconds in its tooltip.
     assert_eq!(
         part.matches("<td class=\"c-s\"><div class=\"hb\" role=\"img\"")

@@ -404,6 +404,10 @@ pub struct FRow {
     pub from: String,
     pub script: String,
     pub script_url: String,
+    /// A script ran during the freeze (the overview leaves the cell empty
+    /// when none did).
+    #[serde(skip)]
+    pub has_script: bool,
     pub account: String,
     pub user: String,
     pub user_url: String,
@@ -706,6 +710,7 @@ pub fn freeze_rows(ctx: &Ctx, ctl: &Ctl, q: &FreezeQuery) -> (Vec<FRow>, u64) {
                     file,
                     layout,
                     from,
+                    has_script: !script.is_empty(),
                     script: if kind == "mark" && script.is_empty() {
                         "—".into()
                     } else {
