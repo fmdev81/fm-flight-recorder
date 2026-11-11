@@ -519,15 +519,16 @@ fn overview_shows_the_newest_freezes_first_and_no_aggregates() {
     // The aggregates are on the Layouts and Scripts pages only.
     assert!(!t.contains("Worst layouts") && !t.contains("Worst scripts"));
     assert!(!page.contains("id=\"ov-worst\""));
-    // "Latest freezes" comes before the timeline.
+    // The timeline comes first, then "Latest freezes".
     let latest = page.find("id=\"ov-latest\"").expect("latest freezes");
     let lanes = page.find("Who froze, when").expect("lanes");
-    assert!(latest < lanes, "latest freezes is above the timeline");
+    assert!(lanes < latest, "the timeline is above latest freezes");
+    let end = latest + page[latest..].find("</table>").expect("table end");
     // Rows carry their id (app.js marks new rows) and a machine time.
     assert!(page.contains("<tr class=\"fr\" data-id=\""));
     assert!(page.contains("<time datetime=\"20"));
     // Newest first: the times of the rows go down.
-    let part = &page[latest..lanes];
+    let part = &page[latest..end];
     let times: Vec<&str> = part
         .split("<time datetime=\"")
         .skip(1)

@@ -16,10 +16,10 @@
 
 <div class="lv" id="ov-tiles" data-live>{% call m::tiles(v.tiles, "g-tiles4") %}</div>
 
+{% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
+
 <div class="card latest" id="ov-latest" data-live>
 <div class="ch"><h2 class="ct">Latest freezes</h2><span class="sub">newest first · {{ v.recent.len() }} of {{ v.recent_total }}</span><a href="/freezes?{{ v.ctl.qs() }}" class="ca">All freezes</a></div>
 {% include "freeze_table.html" %}
 </div>
-
-{% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 {% endblock %}
