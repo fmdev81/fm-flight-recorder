@@ -967,7 +967,7 @@ fn none_text(r: &Range) -> &'static str {
 }
 
 /// Rows of "Latest freezes" on the overview.
-pub const OVERVIEW_ROWS: usize = 15;
+pub const OVERVIEW_ROWS: usize = 8;
 
 pub struct Overview {
     pub ctl: Ctl,
@@ -988,13 +988,7 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
     let f = ctx.facts(&r, &Filter::file(&file));
     let fz: Vec<Fact> = freezes_only(&f).cloned().collect();
     let a = Agg::of(&fz);
-    let busy = f
-        .iter()
-        .filter(|x| x.kind == Kind::Busy)
-        .map(|x| x.n)
-        .sum::<u64>();
     let clients_hit: BTreeSet<i64> = fz.iter().map(|x| x.client_id).collect();
-    let accounts: BTreeSet<&str> = fz.iter().map(|x| x.account.as_str()).collect();
     let connected = ctx.clients.iter().filter(|c| c.connected).count();
     let none = none_text(&r);
     let mut t3 = if a.n == 0 {
@@ -1004,11 +998,8 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
             "no freezes to split".into(),
         )
     } else {
-        tile(
-            "Waiting on server",
-            pct(a.share()),
-            format!("Server {} · Client {}", dur(a.wait), dur(a.client())),
-        )
+        // The split bar is the sub-line; its tooltip has the seconds.
+        tile("Waiting on server", pct(a.share()), String::new())
     };
     if a.n > 0 {
         t3.split = Some(Split::new(&a, a.total));
@@ -1016,18 +1007,8 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
     let mut t4 = tile(
         "Clients affected",
         num(clients_hit.len() as u64),
-        if a.n == 0 {
-            format!(
-                "{connected} connected · {} offline",
-                ctx.clients.len() - connected
-            )
-        } else {
-            format!(
-                "{connected} connected · {} offline · {} accounts",
-                ctx.clients.len() - connected,
-                accounts.len()
-            )
-        },
+        // Offline clients and accounts are on the Clients and Users pages.
+        format!("{connected} connected"),
     );
     t4.small = format!("of {}", ctx.clients.len());
     t4.link = "/users".into();
@@ -1043,12 +1024,13 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
             tile(
                 "Freezes",
                 num(a.n),
-                format!("p95 {} · {} script busy", dur(a.p95()), busy),
+                // Script busy is on the Scripts page.
+                format!("p95 {}", dur(a.p95())),
             ),
             tile(
                 "Time frozen",
                 dur(a.total),
-                format!("avg {} per freeze", dur1(a.avg_ms() as u64)),
+                format!("avg {}", dur1(a.avg_ms() as u64)),
             ),
             t3,
             t4,

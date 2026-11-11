@@ -162,18 +162,6 @@ pub struct ZLink {
     pub on: bool,
 }
 
-/// The newest freeze of the graph, for the header line.
-#[derive(Debug, Clone, Default)]
-pub struct Latest {
-    pub t: String,
-    pub iso: String,
-    pub ago: String,
-    pub layout: String,
-    pub acct: String,
-    pub client: String,
-    pub d: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Clients,
@@ -322,7 +310,6 @@ pub struct Lanes {
     pub now_out: bool,
     /// The navigator: the day window with all freezes, and the range.
     pub nav: Option<Nav>,
-    pub latest: Option<Latest>,
 }
 
 impl Lanes {
@@ -850,17 +837,6 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         .flat_map(|l| l.evs.iter())
         .max_by_key(|e| (e.d, std::cmp::Reverse(e.ts)))
         .map(|e| e.id);
-    if let Some(e) = &newest {
-        out.latest = Some(Latest {
-            t: z.stamp_tz(e.ts, now),
-            iso: crate::tz::iso(e.ts),
-            ago: crate::tz::ago(e.ts, now),
-            layout: e.layout.clone(),
-            acct: acct_label(e),
-            client: ctx.client_name(e.client),
-            d: dur1(e.d),
-        });
-    }
     let newest = newest.map(|e| e.id);
     let total_ev: usize = raws.iter().map(|l| l.evs.len()).sum();
     let per_lane = MAX_BLOCKS_LANE.min((MAX_BLOCKS / raws.len().max(1)).max(30));

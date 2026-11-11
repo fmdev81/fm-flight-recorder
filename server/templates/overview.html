@@ -6,20 +6,29 @@
 {% include "controls.html" %}
 {% endblock %}
 {% block content %}
-<div class="card flagbar" id="ov-flags" data-live>
-<h2 class="ct">Flags</h2>{% if v.flags.count > 0 %}<span class="flag">{{ v.flags.count }}</span>{% else %}<span class="muted">0</span>{% endif %}
-<span class="fgrp"><span class="lbl">{{ v.flags.p95_label }}</span>{% for x in v.flags.p95 %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}{% if v.flags.p95.is_empty() %}<span class="muted">none</span>{% endif %}</span>
-<span class="fgrp"><span class="lbl">{{ v.flags.plugin_label }}</span>{% for x in v.flags.old %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}{% if v.flags.old.is_empty() %}<span class="muted">none</span>{% endif %}</span>
-<span class="fgrp"><span class="lbl">{{ v.flags.quiet_label }}</span>{% for x in v.flags.quiet %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}{% if v.flags.quiet.is_empty() %}<span class="muted">none</span>{% endif %}</span>
+{# Flags: one line, only when a flag fires. The empty part stays in the
+   page (hidden) so a live update can show a new flag. #}
+{% if v.flags.count > 0 %}<div class="card flagbar" id="ov-flags" data-live>
+<h2 class="ct">Flags</h2><span class="flag">{{ v.flags.count }}</span>
+{% if !v.flags.p95.is_empty() %}<span class="fgrp" title="{{ v.flags.p95_label }}">{% for x in v.flags.p95 %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}</span>{% endif %}
+{% if !v.flags.old.is_empty() %}<span class="fgrp" title="{{ v.flags.plugin_label }}">{% for x in v.flags.old %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">plug-in {{ x.chip }}</span>{% endfor %}</span>{% endif %}
+{% if !v.flags.quiet.is_empty() %}<span class="fgrp" title="{{ v.flags.quiet_label }}">{% for x in v.flags.quiet %}<a href="{{ x.url }}">{{ x.name }}</a><span class="flag">{{ x.chip }}</span>{% endfor %}</span>{% endif %}
 <a class="thr" href="/setup#s-flags">Thresholds</a>
-</div>
+</div>{% else %}<div id="ov-flags" data-live hidden></div>{% endif %}
 
 <div class="lv" id="ov-tiles" data-live>{% call m::tiles(v.tiles, "g-tiles4") %}</div>
 
 {% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 
 <div class="card latest" id="ov-latest" data-live>
-<div class="ch"><h2 class="ct">Latest freezes</h2><span class="sub">newest first · {{ v.recent.len() }} of {{ v.recent_total }}</span><a href="/freezes?{{ v.ctl.qs() }}" class="ca">All freezes</a></div>
-{% include "freeze_table.html" %}
+<div class="ch"><h2 class="ct">Latest freezes</h2><a href="/freezes?{{ v.ctl.qs() }}" class="ca">All {{ v.recent_total }} freezes</a></div>
+{# Short rows: time, duration, layout, account. The Freezes page has all
+   columns (split, from, client, script, file, round trips, server). #}
+{% if v.recent.is_empty() %}<div class="empty">{% if v.ctl.range == "today" %}No freezes yet today. The recorder is on standby until a client opens a session.{% else %}No freezes in this range.{% endif %}</div>{% else %}
+<table class="t ft ftshort">
+<thead><tr><th>Time</th><th class="r">Duration</th><th>Layout</th><th>Account</th></tr></thead>
+<tbody>
+{% for r in v.recent %}{% call m::ftr_short(r) %}{% endfor %}
+</tbody></table>{% endif %}
 </div>
 {% endblock %}

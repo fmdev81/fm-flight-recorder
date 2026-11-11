@@ -1,42 +1,43 @@
 <figure class="card lanes{% if lz.compact %} compact{% endif %}{% if lz.strip %} strip{% endif %}{% if lz.scaled %} scaled{% endif %}" id="{{ lz.id }}" data-live aria-labelledby="{{ lz.id }}-h" data-lanes data-now="{{ lz.now_ms }}" data-clock0="{{ lz.now_label }}" data-f0="{{ lz.now_f }}" data-win="{{ lz.win1 - lz.win0 }}" data-lo="{{ lz.lo_min }}" data-hi="{{ lz.hi_min }}" data-dlo="{{ lz.day_lo }}" data-dhi="{{ lz.day_hi }}" data-xlo="{{ lz.ext_lo }}" data-xhi="{{ lz.ext_hi }}" data-nowm="{{ lz.now_m }}" data-follow="{{ lz.follow }}" data-abbr="{{ lz.abbr }}"{% if !lz.live_url.is_empty() %} hx-get="{{ lz.live_url }}" hx-trigger="every 30s [document.visibilityState==='visible']" hx-swap="outerHTML"{% endif %}>
 <div class="ch"><h2 class="ct" id="{{ lz.id }}-h">{{ lz.title }}</h2>
 {% if !lz.strip %}<div class="seg zoom" role="group" aria-label="Range presets">{% for z in lz.zoom_links %}<a href="{{ z.href }}" aria-pressed="{{ z.on }}" data-zoom data-preset="{{ z.label }}">{{ z.label }}</a>{% endfor %}</div>
-<span class="zlab" aria-live="polite"><b class="mono">{{ lz.zoom_label }}</b>, <span class="zspan">{{ lz.span_label }}</span><span class="zfol"{% if lz.follow <= 0.0 %} hidden{% endif %}> · follows now</span></span><a class="btn zreset{% if !lz.zoomed %} off{% endif %}" href="{{ lz.zoom_reset }}" data-zoom data-preset="Day">Reset</a>{% endif %}
-<span class="key"><span class="sw sw-s"></span>Server wait</span><span class="key"><span class="sw sw-c"></span>Client time</span><span class="lnote">{% if lz.strip %}Positions to time scale{% else %}{{ lz.lnote }}{% endif %}</span></div>
-{% if let Some(n) = lz.latest %}<p class="latest-line"><span class="nb">Newest</span> <span class="mono">{{ n.t }}</span> <span class="ago" data-ago="{{ n.iso }}">{{ n.ago }}</span> · <b>{{ n.layout }}</b> · {{ n.acct }} · {{ n.client }} · <span class="mono">{{ n.d }}</span></p>{% endif %}
-<div class="lz">
-<div class="lzr lzax" aria-hidden="true"><span></span><div class="trk">{% for a in lz.axis %}<span class="tick{% if !a.wide %} nw{% endif %}{% if !a.narrow %} nn{% endif %}{% if a.near %} hid{% endif %}" style="left: {{ a.x }}">{{ a.label }}</span>{% endfor %}{% if lz.has_now() %}<span{% if lz.now_out %} hidden{% endif %} class="rec{% if lz.rec_left %} rec-l{% endif %}" style="left: {{ lz.now_x }}"><i class="{% if lz.rec %}on{% else %}sb{% endif %}"></i>{% if lz.rec %}REC{% else %}STANDBY{% endif %} <time data-clock>{{ lz.now_label }}</time></span>{% endif %}</div><span></span></div>
+<span class="zlab" aria-live="polite"><b>{{ lz.zoom_label }}</b>, <span class="zspan">{{ lz.span_label }}</span><span class="zfol"{% if lz.follow <= 0.0 %} hidden{% endif %}> · follows now</span></span><a class="btn zreset{% if !lz.zoomed %} off{% endif %}" href="{{ lz.zoom_reset }}" data-zoom data-preset="Day">Reset</a>{% endif %}
+</div>
+{# The newest freeze: the red ring on its block and the first row of
+   "Latest freezes". The scale note is the tooltip of the lanes. #}
+<div class="lz" title="{% if lz.strip %}Positions to time scale{% else %}{{ lz.lnote }}{% endif %}">
+<div class="lzr lzax" aria-hidden="true"><span></span><div class="trk">{% for a in lz.axis %}<span class="tick{% if !a.wide %} nw{% endif %}{% if !a.narrow %} nn{% endif %}{% if a.near %} hid{% endif %}" style="left: {{ a.x }}">{{ a.label }}</span>{% endfor %}{% if lz.has_now() %}<span{% if lz.now_out %} hidden{% endif %} class="rec{% if lz.rec_left %} rec-l{% endif %}" style="left: {{ lz.now_x }}" title="{% if lz.rec %}Recording{% else %}Standby{% endif %}, now"><i class="{% if lz.rec %}on{% else %}sb{% endif %}"></i><span class="vh">{% if lz.rec %}REC{% else %}STANDBY{% endif %} <time data-clock>{{ lz.now_label }}</time></span></span>{% endif %}</div><span></span></div>
 {% if lz.has_now() %}<div{% if lz.now_out %} hidden{% endif %} class="ph" style="--f: {{ lz.now_f }}" aria-hidden="true"></div>{% endif %}
 {% for l in lz.lanes %}
 <div class="lzr ln" role="group" aria-label="{{ l.label }}">
-<a class="lnl" href="{{ l.url }}" title="{{ l.label }}">{{ l.label }}</a>
+<a class="lnl{% if l.off %} off{% endif %}" href="{{ l.url }}" title="{{ l.label }}{% if l.off %} (offline){% endif %}: {{ l.total }} frozen, {{ l.n }} freezes in this range">{{ l.label }}</a>
 <div class="trk">
 <div class="base"></div>
 {% for s in l.sess %}<div class="ss" title="{{ s.title }}" style="left: {{ s.x }}; width: {{ s.w }}" data-a="{{ s.a }}" data-b="{{ s.b }}"></div>{% endfor %}
 {% if !l.now_x.is_empty() %}<div class="nowl" style="left: {{ l.now_x }}" aria-hidden="true"></div>{% endif %}
 {% for b in l.blocks %}<span class="fz{% if b.hit %} hit{% endif %}{% if b.newest %} newest{% endif %}" role="img" style="left: {{ b.x }}; width: {{ b.wc }}" tabindex="{% if loop.first %}0{% else %}-1{% endif %}" aria-label="{{ b.aria }}" title="{{ b.aria }}" data-id="{{ b.id }}" data-t="{{ b.t }}" data-d="{{ b.d }}" data-from="{{ b.from }}" data-layout="{{ b.layout }}" data-acct="{{ b.acct }}" data-script="{{ b.script }}" data-client="{{ b.client }}" data-srv="{{ b.srv }}" data-cli="{{ b.cli }}" data-pct="{{ b.pct }}" data-bin="{{ b.bin }}" data-m="{{ b.m }}" data-dm="{{ b.dm }}" data-gw="{{ b.w }}"><span class="s" style="width: {{ b.swc }}"></span><span class="c"></span></span>{% endfor %}
 </div>
-<span class="lnt"><span>{{ l.total }}</span> · {{ l.n }}{% if l.off %} · off{% endif %}</span>
 </div>
 {% endfor %}
 {% if !lz.more.is_empty() %}<div class="lzr ln"><span></span><a class="lmore" href="{{ lz.more_url }}">{{ lz.more }}</a><span></span></div>{% endif %}
 </div>
 {% if let Some(nv) = lz.nav %}<div class="lz lzn"><div class="lzr lnav">
-<span class="navl mono">{{ nv.lo }}</span>
-<div class="lnbar" data-nav title="Drag the window to move the range, its edges to change it, or the bar to pick a new range">
+<span></span>
+<div class="lnbar" data-nav title="{{ nv.lo }}–{{ nv.hi }}. Drag the window to move the range, its edges to change it, or the bar to pick a new range">
 <svg class="navp" viewBox="0 0 1000 24" preserveAspectRatio="none" aria-hidden="true">{% for b in nv.bars %}<rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"></rect>{% endfor %}</svg>
 {% if !nv.now_x.is_empty() %}<i class="navnow" style="left: {{ nv.now_x }}" aria-hidden="true"></i>{% endif %}
 <div class="nwin" style="left: {{ nv.x }}; width: {{ nv.w }}" tabindex="0" role="slider" aria-label="Visible range. Arrow keys move it, Shift + arrow keys change its length, Home and End go to the start and to now" aria-valuemin="{{ lz.ext_lo }}" aria-valuemax="{{ lz.ext_hi }}" aria-valuenow="{{ lz.lo_min }}" aria-valuetext="{{ lz.zoom_label }}, {{ lz.span_label }}"><span class="nh nh-l" data-h="l" aria-hidden="true"></span><span class="nh nh-r" data-h="r" aria-hidden="true"></span></div>
 </div>
-<span class="navl mono">{{ nv.hi }}</span>
+<span></span>
 </div></div>{% endif %}
-<div class="lzf"><figcaption>{{ lz.caption }}{% if !lz.note.is_empty() %} <span class="muted">{{ lz.note }}</span>{% endif %}</figcaption>
+<div class="lzf">{% if lz.empty || !lz.note.is_empty() %}<figcaption>{% if lz.empty %}{{ lz.caption }}{% endif %}{% if !lz.note.is_empty() %} <span class="muted">{{ lz.note }}</span>{% endif %}</figcaption>{% endif %}
+<span class="key"><span class="sw sw-s"></span>Server wait</span><span class="key"><span class="sw sw-c"></span>Client time</span>
 {% if !lz.table.is_empty() %}<details class="tv"><summary class="btn">Table view</summary>
+{% if !lz.empty %}<p class="tvcap">{{ lz.caption }}</p>{% endif %}
 <div class="tw"><table class="t">
 <thead><tr><th>Time</th><th>Client</th><th>Layout</th><th>Account</th><th class="r">Duration</th><th class="r">Server</th></tr></thead>
 <tbody>{% for r in lz.table %}<tr><td class="mono"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td><td>{{ r.client }}</td><td>{{ r.layout }}</td><td class="mono">{{ r.acct }}</td><td class="r mono">{{ r.d }}</td><td class="r mono">{{ r.pct }}</td></tr>{% endfor %}</tbody>
 </table></div>{% if lz.table_more %}<div class="sub muted">The newest {{ lz.table.len() }} freezes. All freezes has the rest.</div>{% endif %}
 </details>{% endif %}
-{% if !lz.all_url.is_empty() %}<a href="{{ lz.all_url }}">All freezes</a>{% endif %}
 </div>
 </figure>

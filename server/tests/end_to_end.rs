@@ -189,12 +189,10 @@ fn every_page_renders_with_synthetic_data() {
         (
             "/",
             &[
-                "Flags",
                 "Who froze, when",
-                "Silent, session open",
                 "Latest freezes",
-                "newest first",
-                "Times in",
+                "connected",
+                "Last event",
             ],
         ),
         (
@@ -540,8 +538,51 @@ fn overview_shows_the_newest_freezes_first_and_no_aggregates() {
     // tooltips.
     let abbr = app.zone.abbr(fr_server::tz::now_ms());
     assert!(t.contains("Today "));
-    assert!(page.contains(&format!("Times in <b>{abbr}</b>")));
+    assert!(page.contains(&format!(">{abbr}</span></div>")), "the zone in the footer");
     assert!(page.contains(&format!(" {abbr}\"><time datetime=")));
+}
+
+#[test]
+fn overview_is_calm() {
+    let (app, base, _d) = server("calm");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    let page = get(&base, "/").body;
+    // Latest freezes: time, duration, layout, account; 8 rows at most.
+    let latest = page.find("id=\"ov-latest\"").unwrap();
+    let part = &page[latest..latest + page[latest..].find("</table>").unwrap()];
+    assert!(part.contains("<th>Time</th><th class=\"r\">Duration</th><th>Layout</th><th>Account</th></tr>"));
+    for gone in ["<th>From</th>", "Split</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
+        assert!(!part.contains(gone), "{gone}");
+    }
+    let rows = part.matches("<tr class=\"fr\"").count();
+    assert!(rows > 0 && rows <= 8, "{rows}");
+    // The Freezes page keeps all columns.
+    let fz = get(&base, "/freezes").body;
+    for kept in ["<th>From</th>", "<th>Client</th>", "<th>Script</th>", "Round trips"] {
+        assert!(fz.contains(kept), "{kept}");
+    }
+    // Tiles: one number and at most one short line.
+    let tiles = &page[page.find("id=\"ov-tiles\"").unwrap()..];
+    let tiles = &tiles[..tiles.find("</div>\n</div></div>").unwrap_or(tiles.len().min(4000))];
+    for gone in ["script busy", "per freeze", "offline", "accounts", "Server 0", "Client 0"] {
+        assert!(!tiles.contains(gone), "{gone}");
+    }
+    // The timeline: no newest line, no scale note, no lane totals, no
+    // summary sentence in view (it is in Table view).
+    let fig = &page[page.find("<figure class=\"card lanes").unwrap()..page.find("</figure>").unwrap()];
+    assert!(!fig.contains("class=\"latest-line\""));
+    assert!(!fig.contains("class=\"lnote\""));
+    assert!(!fig.contains("class=\"lnt\""));
+    assert!(fig.contains("class=\"tvcap\""));
+    assert!(fig.contains("frozen, "), "lane totals are in the lane tooltip");
+    // Footer: one short line; versions and the zone name are on Setup.
+    let foot = &page[page.find("<footer").unwrap()..page.find("</footer>").unwrap()];
+    assert!(!foot.contains("Plug-in") && !foot.contains("FM Flight Recorder server"));
+    let setup = get(&base, "/setup").body;
+    assert!(setup.contains("Plug-in ") && setup.contains("Times in "));
 }
 
 #[test]
@@ -564,9 +605,8 @@ fn timeline_blocks_are_not_links_and_zoom_is_to_time_scale() {
     }
     // No label on the track that can hide a block.
     assert!(!fig.contains("class=\"hl"));
-    // The newest freeze is marked, with a line in the header.
+    // The newest freeze is marked (the red ring).
     assert!(fig.contains(" newest\""));
-    assert!(fig.contains("class=\"latest-line\""));
     // Zoom buttons are links that keep the page query.
     for z in ["zoom=15m", "zoom=1h", "zoom=4h"] {
         assert!(fig.contains(z), "{z}");
