@@ -466,7 +466,10 @@
   function followPad(x) { return Math.max(0.5, x * 0.06); }
   function followView(f, x) {
     var n = nowMin(f);
-    return { lo: Math.max(0, n - x), hi: Math.min(1440, n + followPad(x)), follow: x };
+    // A tab left open past midnight: n is beyond the day until the page
+    // loads the new day (tick asks for it). Keep a valid range meanwhile.
+    var hi = Math.min(1440, n + followPad(x)), lo = Math.max(0, Math.min(n - x, hi - MIN_SPAN));
+    return { lo: lo, hi: hi, follow: x };
   }
   // Keep the range in the day window, at least MIN_SPAN long; a move keeps
   // the length.
@@ -516,31 +519,40 @@
     var t = Math.max(0, Math.min(1, (span - FULL_SCALE) / (GLYPH_SCALE - FULL_SCALE)));
     return 4 + Math.max(0, gw - 4) * t;
   }
-  // Axis ticks: the same steps as ticks() in lanes.rs.
+  // Axis ticks: the same steps as ticks() in lanes.rs. A pure function (the
+  // test in tests/js runs it). It never loops on a range that is not a
+  // finite, positive span: that was a way to freeze the tab.
   var STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 14400, 21600];
-  function drawTicks(f, lo, hi, nowM) {
-    var trk = f.querySelector(".lzax .trk");
-    if (!trk) return;
-    trk.querySelectorAll(".tick").forEach(function (t) { t.remove(); });
+  var MAX_TICKS = 200;
+  function tickPlan(lo, hi, nowM) {
+    var out = [];
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return { secs: false, ticks: out };
     var span = (hi - lo) * 60;
     var pick = function (n) { for (var i = 0; i < STEPS.length; i++) if (span / STEPS[i] <= n) return STEPS[i]; return 21600; };
-    var s1 = pick(8), s2 = pick(4), secs = s1 < 60, seen = {}, out = [];
+    var s1 = pick(8), s2 = pick(4), seen = {};
     [s1, s2].forEach(function (step) {
-      for (var t = Math.ceil(lo * 60 / step) * step; t <= hi * 60; t += step) {
+      var t = Math.ceil(lo * 60 / step) * step, guard = 0;
+      for (; t <= hi * 60 && guard < MAX_TICKS; t += step, guard++) {
         if (seen[t]) continue;
         seen[t] = 1;
         var m = t / 60;
         if (nowM !== null && Math.abs(m - nowM) < (hi - lo) * 0.04) continue;
-        out.push({ t: t, m: m });
+        out.push({ t: t, m: m, nw: !!(t % s1), nn: !!(t % s2) });
       }
     });
     out.sort(function (a, b) { return a.m - b.m; });
-    var first = trk.firstChild;
-    out.forEach(function (o) {
+    return { secs: s1 < 60, ticks: out };
+  }
+  function drawTicks(f, lo, hi, nowM) {
+    var trk = f.querySelector(".lzax .trk");
+    if (!trk) return;
+    trk.querySelectorAll(".tick").forEach(function (t) { t.remove(); });
+    var plan = tickPlan(lo, hi, nowM), first = trk.firstChild;
+    plan.ticks.forEach(function (o) {
       var el = document.createElement("span");
-      el.className = "tick" + (o.t % s1 ? " nw" : "") + (o.t % s2 ? " nn" : "");
+      el.className = "tick" + (o.nw ? " nw" : "") + (o.nn ? " nn" : "");
       el.style.left = ((o.m - lo) / (hi - lo) * 100).toFixed(3) + "%";
-      el.textContent = hm(o.m, secs);
+      el.textContent = hm(o.m, plan.secs);
       trk.insertBefore(el, first);
     });
   }
@@ -747,6 +759,9 @@
     if (live.dirty) liveLater(300);
   }
   document.addEventListener("pointerup", function (e) { navEnd(e, false); });
+  // A drag that loses its pointer (the tab is hidden, the capture is lost)
+  // must end, or the lanes would never swap again.
+  document.addEventListener("lostpointercapture", function (e) { navEnd(e, true); });
   document.addEventListener("pointercancel", function (e) { navEnd(e, true); });
   document.addEventListener("dblclick", function (e) {
     var bar = e.target.closest && e.target.closest("[data-nav]");
@@ -841,6 +856,17 @@
       if (curMin !== lastMin && f.classList.contains("zoomable") && !(nav && nav.f === f)) layout(f, viewOf(f));
     });
     lastMin = curMin;
+  }
+  // A tab left open past midnight asks once for the new day.
+  var midnightAsked = false;
+  function midnight() {
+    var past = false;
+    document.querySelectorAll("[data-lanes].zoomable").forEach(function (f) {
+      var n = nowMin(f);
+      if (n !== null && n > 1441) past = true;
+    });
+    if (past && !midnightAsked) { midnightAsked = true; liveFetch(); }
+    if (!past) midnightAsked = false;
   }
 
   // ---------------------------------------------------------------- tables
@@ -948,16 +974,34 @@
       });
   }
 
-  function liveStart() {
-    if (!window.EventSource || !window.fetch || !document.querySelector("[data-live][id]")) return;
-    var es = new EventSource("/api/v1/live");
+  // The stream is open only while the tab is visible. A browser allows 6
+  // connections to one host; a stream in every hidden tab used them all and
+  // the next page of the dashboard waited for a free one (a hung tab). A tab
+  // that shows again catches up with one fetch.
+  var es = null;
+  function liveOpen() {
+    if (es || document.visibilityState !== "visible") return;
+    es = new EventSource("/api/v1/live");
     es.addEventListener("events", liveFetch);
     es.addEventListener("client", liveFetch);
     // A second hello means the stream came back (server restart): catch up.
     es.addEventListener("hello", function () { if (live.hello) liveFetch(); live.hello = true; });
+  }
+  function liveClose() {
+    if (!es) return;
+    es.close();
+    es = null;
+    live.dirty = true;
+  }
+  function liveStart() {
+    if (!window.EventSource || !window.fetch || !document.querySelector("[data-live][id]")) return;
+    liveOpen();
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible" && live.dirty) liveFetch();
+      if (document.visibilityState === "visible") { liveOpen(); if (live.dirty) liveFetch(); }
+      else liveClose();
     });
+    window.addEventListener("pagehide", liveClose);
+    window.addEventListener("pageshow", function (e) { if (e.persisted) { liveOpen(); liveFetch(); } });
   }
 
   function init() {
@@ -970,7 +1014,7 @@
     initLanes();
     fadeAll();
     agoAll();
-    setInterval(tick, 1000);
+    setInterval(function () { tick(); midnight(); }, 1000);
     setInterval(agoAll, 15000);
     liveStart();
     // Canvas text does not re-render when the web fonts arrive.
@@ -982,6 +1026,7 @@
     }
   }
 
+  if (window.__FR_TEST__) window.__FR_TEST__.tickPlan = tickPlan;
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();
