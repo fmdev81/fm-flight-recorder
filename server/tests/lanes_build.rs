@@ -107,7 +107,11 @@ fn zooming_in_on_a_busy_lane_shows_single_freezes() {
     assert!(vis.iter().all(|b| b.bin.is_empty()));
     // The margin is binned, so the lane stays within its block budget.
     let per_lane = lanes::MAX_BLOCKS_LANE;
-    assert!(l.lanes[0].blocks.len() <= per_lane * 3, "{}", l.lanes[0].blocks.len());
+    assert!(
+        l.lanes[0].blocks.len() <= per_lane * 3,
+        "{}",
+        l.lanes[0].blocks.len()
+    );
     assert!(l.lanes[0].blocks.iter().any(|b| !b.bin.is_empty()));
     // Blocks are in time order.
     let xs: Vec<f64> = l.lanes[0].blocks.iter().map(|b| b.x_v).collect();

@@ -1083,7 +1083,8 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         // The margin first: a few freezes each get a block; more are binned.
         let side_n = left.len() + right.len();
         if side_n <= per_lane {
-            lane.blocks.extend(left.iter().chain(right.iter()).map(|e| one(e)));
+            lane.blocks
+                .extend(left.iter().chain(right.iter()).map(|e| one(e)));
         } else {
             let step = (span_min / per_lane as f64).max((ext.1 - ext.0) / per_lane as f64);
             lane.blocks.extend(bin(&left, lo, step));
@@ -1095,9 +1096,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         if vis.len() <= budget {
             lane.blocks.extend(vis.iter().map(|e| one(e)));
         } else {
-            lane.blocks.extend(bin(&vis, lo, span_min / per_lane as f64));
+            lane.blocks
+                .extend(bin(&vis, lo, span_min / per_lane as f64));
         }
-        lane.blocks.sort_by(|a, b| a.x_v.total_cmp(&b.x_v).then(a.id.cmp(&b.id)));
+        lane.blocks
+            .sort_by(|a, b| a.x_v.total_cmp(&b.x_v).then(a.id.cmp(&b.id)));
         out.lanes.push(lane);
     }
 

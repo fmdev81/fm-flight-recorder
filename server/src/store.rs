@@ -357,11 +357,13 @@ pub fn store_batch(db: &mut Db, b: &Batch, m: Meta) -> Result<IngestReply, Store
         for r in &rows {
             // A long freeze: one row that grows, then the final replaces it.
             let open = match r.kind.as_str() {
-                "freeze_progress" => Some(if progress(&tx, &b.session_id, client_id, r, m.seen_ms)? {
-                    Open::Done
-                } else {
-                    Open::Duplicate
-                }),
+                "freeze_progress" => {
+                    Some(if progress(&tx, &b.session_id, client_id, r, m.seen_ms)? {
+                        Open::Done
+                    } else {
+                        Open::Duplicate
+                    })
+                }
                 "freeze" => replace_open(&tx, &b.session_id, r)?,
                 _ => None,
             };

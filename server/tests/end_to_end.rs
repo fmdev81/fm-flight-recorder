@@ -644,7 +644,10 @@ fn overview_is_calm() {
         .min()
         .expect("end of the tiles part");
     let tiles = &tiles[..end];
-    assert!(tiles.contains("class=\"card tile\""), "the slice has the tiles");
+    assert!(
+        tiles.contains("class=\"card tile\""),
+        "the slice has the tiles"
+    );
     for gone in [
         "script busy",
         "per freeze",
