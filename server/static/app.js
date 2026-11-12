@@ -287,10 +287,11 @@
   document.addEventListener("input", function (e) {
     if (e.target.id === "step-client-name") stepText();
   });
-  // No swap of the lanes during a drag on the navigator.
+  // No swap of the lanes during a drag on the navigator. The dropped
+  // update is fetched again when the drag ends (live.dirty), as for SSE.
   document.body.addEventListener("htmx:beforeSwap", function (e) {
     var tg = e.detail && e.detail.target;
-    if (nav && tg && nav.f === tg) e.detail.shouldSwap = false;
+    if (nav && tg && nav.f === tg) { e.detail.shouldSwap = false; live.dirty = true; }
   });
   document.body.addEventListener("htmx:afterSwap", function (e) {
     // "Load more" grew the list: live updates leave it alone from now on.
