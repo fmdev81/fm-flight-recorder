@@ -1,42 +1,11 @@
 {% extends "base.html" %}
-{% import "macros.html" as m %}
+{% import "tk.html" as tk %}
+{% block mainclass %} tkpage{% endblock %}
 {% block top %}
 <h1 class="h1" style="margin-right: auto">Layouts</h1>
 <span class="date">{{ v.ctl.date }}</span>
 {% include "controls.html" %}
 {% endblock %}
 {% block content %}
-<div class="card">
-<div class="ch"><h2 class="ct">Layouts by total frozen time</h2>{% if v.flagged > 0 %}<span class="flag">{{ v.flagged }} flagged</span>{% endif %}{% call m::keys() %}</div>
-{% if v.rows.is_empty() %}<div class="empty">No freezes</div>{% else %}
-<div class="tw{% if v.rows.len() > 10 %} tall{% endif %}"><table class="t">
-<thead><tr>
-<th>Layout</th><th>File</th><th>Table</th>
-<th class="r"><button type="button" class="sortb" data-col="3" aria-pressed="false">Freezes</button></th>
-<th class="r"><button type="button" class="sortb" data-col="4" aria-pressed="true" data-dir="desc">Total frozen</button></th>
-<th style="width: 20%">Server / client</th>
-<th class="r">p50</th>
-<th class="r"><button type="button" class="sortb" data-col="7" aria-pressed="false">p95</button></th>
-<th class="r">Avg round trips</th>
-<th class="r"><button type="button" class="sortb" data-col="9" aria-pressed="false">Server wait</button></th>
-</tr></thead>
-<tbody>
-{% for r in v.rows %}
-<tr{% if r.flag %} class="flagged"{% endif %}>
-<td><a href="{{ r.url }}">{{ r.name }}</a></td>
-<td class="muted">{{ r.file }}</td>
-<td class="muted">{{ r.table }}</td>
-<td class="r mono" data-v="{{ r.n_v }}">{{ r.n }}</td>
-<td class="r mono" data-v="{{ r.total_v }}">{{ r.total }}</td>
-<td>{% call m::split(r.split) %}</td>
-<td class="r mono">{{ r.p50 }}</td>
-<td class="r mono" data-v="{{ r.p95_v }}">{% if r.flag %}<span class="flag">p95 {{ r.p95 }}</span>{% else %}{{ r.p95 }}{% endif %}</td>
-<td class="r mono">{{ r.rt }}</td>
-<td class="r mono" data-v="{{ r.pct_v }}">{{ r.pct }}</td>
-</tr>
-{% endfor %}
-</tbody>
-<tfoot><tr><td>All</td><td></td><td></td><td class="r mono">{{ v.foot.n }}</td><td class="r mono">{{ v.foot.total }}</td><td>{% call m::split(v.foot.split) %}</td><td class="r mono">{{ v.foot.p50 }}</td><td class="r mono">{{ v.foot.p95 }}</td><td class="r mono">{{ v.foot.rt }}</td><td class="r mono">{{ v.foot.pct }}</td></tr></tfoot>
-</table></div>{% endif %}
-</div>
+{% call tk::table(v.table) %}
 {% endblock %}

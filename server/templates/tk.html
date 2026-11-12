@@ -1,0 +1,36 @@
+{# The shared table of the list pages (src/table.rs). Use it like this:
+   {% import "tk.html" as tk %}  ...  {% call tk::table(v.table) %}
+   The part is a live part (data-live): live updates swap it, and the URL
+   state (sort, dir, q) is in the fetch because app.js keeps it in the URL. #}
+{% macro cell(c) %}<td{% if c.kind == "num" %} class="r"{% endif %} data-v="{{ c.val.attr() }}"{% if !c.title.is_empty() %} title="{{ c.title }}"{% endif %}>{% if c.kind == "split" %}<div class="hb" role="img" aria-label="{{ c.split.title }}" title="{{ c.split.title }}"><div class="hs" style="width: {{ c.split.s }}"></div><div class="hc" style="width: {{ c.split.c }}"></div></div>{% else if c.kind == "tags" %}{% for g in c.tags %}<span class="tag">{{ g }}</span>{% endfor %}{% else %}{% if !c.dot.is_empty() %}<span class="pill"><span class="dot dot-{{ c.dot }}"></span>{% endif %}{% if !c.url.is_empty() %}<a{% if c.mono %} class="mono"{% endif %} href="{{ c.url }}">{% else if c.mono || c.muted %}<span class="{% if c.mono %}mono{% endif %}{% if c.muted %} muted{% endif %}">{% endif %}{% if !c.flag.is_empty() %}<span class="flag">{{ c.flag }}</span>{% else %}{{ c.text }}{% endif %}{% if !c.url.is_empty() %}</a>{% else if c.mono || c.muted %}</span>{% endif %}{% if !c.dot.is_empty() %}</span>{% endif %}{% if !c.chip.is_empty() %} <span class="flag">{{ c.chip }}</span>{% endif %}{% endif %}</td>{% endmacro %}
+
+{% macro rows(t) %}{% for r in t.rows %}<tr{% if !r.url.is_empty() %} data-href="{{ r.url }}"{% endif %}{% if r.flagged || r.ongoing %} class="{% if r.flagged %}flagged{% endif %}{% if r.ongoing %} ongoing{% endif %}"{% endif %}{% if !r.id.is_empty() %} data-id="{{ r.id }}"{% endif %} data-s="{{ r.search }}"{% if r.hidden %} hidden{% endif %}>{% for c in r.cells %}{% call cell(c) %}{% endfor %}</tr>{% endfor %}{% endmacro %}
+
+{% macro table(t) %}
+<section class="card tk{% if t.inline %} inline{% endif %}" id="{{ t.id }}" data-live data-tk{% if t.server %} data-server{% endif %} data-one="{{ t.one }}" data-many="{{ t.many }}" data-sort="{{ t.sort }}" data-dir="{{ t.dir }}" aria-label="{{ t.many }}">
+<div class="tkbar">
+<form class="tkq" method="get" action="{{ t.path }}" role="search">
+{% for kv in t.keep %}<input type="hidden" name="{{ kv.0 }}" value="{{ kv.1 }}">{% endfor %}
+<input type="hidden" name="sort" value="{{ t.sort }}"><input type="hidden" name="dir" value="{{ t.dir }}">
+<input class="fsel tkf" type="search" name="q" value="{{ t.q }}" placeholder="Filter {{ t.many }}" aria-label="Filter {{ t.many }}" autocomplete="off" spellcheck="false">
+<noscript><button class="btn" type="submit">Filter</button></noscript>
+</form>
+{% if !t.seg.is_empty() %}<div class="seg" role="group" aria-label="Source">{% for s in t.seg %}<a href="{{ s.0 }}" aria-pressed="{{ s.2 }}">{{ s.1 }}</a>{% endfor %}</div>{% endif %}
+<span class="tkn" id="{{ t.id }}-count" data-tkn aria-live="polite">{{ t.count_text() }}</span>
+</div>
+<div class="tkw" tabindex="0" role="region" aria-label="{{ t.many }} table">
+<table class="t tkt">
+<thead><tr>
+{% for c in t.cols %}<th{% if c.num %} class="r"{% endif %} scope="col" aria-sort="{{ c.aria }}"{% if !c.tip.is_empty() %} title="{{ c.tip }}"{% endif %} data-key="{{ c.key }}"{% if c.num %} data-num{% endif %}>{% if c.key.is_empty() %}{{ c.label }}{% else %}<a class="tks" href="{{ c.href }}">{{ c.label }}<span class="arr" aria-hidden="true">{% if c.arrow == "asc" %}▲{% else if c.arrow == "desc" %}▼{% endif %}</span></a>{% endif %}</th>{% endfor %}
+</tr></thead>
+<tbody id="{{ t.id }}-body">
+{% call rows(t) %}
+</tbody>
+{% if !t.foot.is_empty() %}<tfoot><tr>{% for c in t.foot %}{% call cell(c) %}{% endfor %}</tr></tfoot>{% endif %}
+</table>
+<p class="tkempty empty"{% if t.visible() > 0 %} hidden{% endif %} data-tkempty>{{ t.empty_text() }}</p>
+</div>
+<div class="more" id="{{ t.id }}-more">{% if !t.more.is_empty() %}<button type="button" class="btn" hx-get="{{ t.more }}" hx-target="#{{ t.id }}-body" hx-swap="beforeend">Load more</button>{% endif %}</div>
+{% if !t.note.is_empty() %}<p class="tknote">{{ t.note }}{% if !t.note_link.0.is_empty() %} <a href="{{ t.note_link.0 }}">{{ t.note_link.1 }}</a>{% endif %}</p>{% endif %}
+</section>
+{% endmacro %}

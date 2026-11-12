@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
+{% import "tk.html" as tk %}
 {% block top %}
 <nav aria-label="Breadcrumb" class="crumbs"><a href="/users">Users</a><span class="muted">/</span><span class="mono">{{ v.account }}</span></nav>
 <div class="title">
@@ -8,14 +9,14 @@
 {% if !v.files.is_empty() %}<span>File {{ v.files }}</span>{% endif %}
 {% for c in v.clients %}<a href="{{ c.url }}">{{ c.name }}</a>{% endfor %}
 <span>Last seen <span class="mono">{{ v.seen }}</span></span>
-{% if v.connected %}<span class="pill"><span class="dot dot-ok"></span>Connected</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Offline</span>{% endif %}
+{% if v.connected %}<span class="pill"><span class="dot dot-ok"></span>Online</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Offline</span>{% endif %}
 </div>
 </div>
 {% include "controls.html" %}
 <a class="btn" href="{{ v.ctl.cmp_url() }}" aria-pressed="{{ v.ctl.cmp }}">Compare to last week</a>
 {% endblock %}
 {% block content %}
-{% call m::tiles(v.tiles, "g-tiles") %}
+{% call m::metrics(v.tiles) %}
 
 {% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 
@@ -33,27 +34,15 @@
 <div class="grid g-2">
 <div class="card">
 <div class="ch"><h2 class="ct">Clients</h2><span class="sub">7 days</span></div>
-{% if v.clients.is_empty() %}<div class="empty">No clients</div>{% endif %}
-<div style="display: flex; flex-direction: column; gap: 16px">
-{% for c in v.clients %}
-<div style="display: flex; flex-direction: column; gap: 10px">
-<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px"><a href="{{ c.url }}" style="font-weight: 600; color: var(--ink); text-decoration: none">{{ c.name }}</a>{% if c.connected %}<span class="pill"><span class="dot dot-ok"></span>Connected</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Offline</span>{% endif %}</div>
-<div class="kv">
-<div><span class="lbl">FileMaker</span><b>{{ c.app }}</b></div>
-<div><span class="lbl">Plug-in</span><b>{{ c.plugin }}</b></div>
-<div><span class="lbl">Sessions</span><b>{{ c.sessions }}</b></div>
-<div><span class="lbl">Freezes</span><b>{{ c.n }}</b></div>
-<div><span class="lbl">Frozen</span><b>{{ c.total }}</b></div>
-</div>
-</div>
-{% endfor %}
-</div>
+{% if v.clients.is_empty() %}<div class="empty">No clients</div>{% else %}
+<div class="tw"><table class="t plain">
+<thead><tr><th>Client</th><th>Status</th><th>FileMaker</th><th>Plug-in</th><th class="r">Sessions</th><th class="r">Freezes</th><th class="r">Frozen time</th></tr></thead>
+<tbody>
+{% for c in v.clients %}<tr><td><a href="{{ c.url }}">{{ c.name }}</a></td><td><span class="pill"><span class="dot {% if c.connected %}dot-ok{% else %}dot-off{% endif %}"></span>{% if c.connected %}Online{% else %}Offline{% endif %}</span></td><td>{{ c.app }}</td><td>{{ c.plugin }}</td><td class="r">{{ c.sessions }}</td><td class="r">{{ c.n }}</td><td class="r">{{ c.total }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
 </div>
 <div class="card"><div class="ch"><h2 class="ct">Freezes by duration</h2></div>{% call m::hist(v.by_dur, "") %}</div>
 </div>
 
-<div class="card">
-<div class="ch"><h2 class="ct">Latest events</h2></div>
-{% call m::events(v.events, false, true) %}
-</div>
+{% call tk::table(v.table) %}
 {% endblock %}

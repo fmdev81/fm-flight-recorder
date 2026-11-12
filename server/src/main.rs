@@ -229,6 +229,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let now = now_ms();
             rollup::close_offline_sessions(&c, now, app.connected_ms())
                 .map_err(|e| e.to_string())?;
+            rollup::close_open_freezes(&c, now).map_err(|e| e.to_string())?;
             let rep = rollup::run(&mut c, app.zone, &s, now).map_err(|e| e.to_string())?;
             println!("{rep}");
             Ok(())

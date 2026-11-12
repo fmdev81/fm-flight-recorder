@@ -21,6 +21,7 @@ pub mod log;
 pub mod query;
 pub mod rollup;
 pub mod store;
+pub mod table;
 pub mod tz;
 pub mod views;
 pub mod web;

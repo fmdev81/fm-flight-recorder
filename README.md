@@ -25,6 +25,10 @@ For each freeze, the plug-in records:
 
 The companion server (`fr-server`) receives the events from the plug-ins on your LAN and shows them in a dashboard.
 
+<p align="center"><img src="docs/images/dashboard-live.gif" alt="The FM Flight Recorder dashboard, animated: the range navigator zooms the timeline into the last 20 minutes, short freezes arrive in bursts on eight client lanes and at the top of Latest freezes, and two long freezes grow with an ongoing mark" width="100%"></p>
+
+<p align="center"><em>The redesigned dashboard (PR #74) on synthetic demo data with eight simulated clients.</em></p>
+
 ## Status
 
 This project is pre-alpha.

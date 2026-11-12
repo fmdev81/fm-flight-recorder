@@ -150,6 +150,9 @@ pub fn spawn_jobs(app: Shared) {
                 let closed = rollup::close_offline_sessions(&db, now, a.connected_ms())?;
                 // A client went offline: the Clients page and the footer change.
                 a.live.notify(Kind::Client, closed as u64);
+                let ended = rollup::close_open_freezes(&db, now)?;
+                // An open freeze ended: the freeze lists change.
+                a.live.notify(Kind::Events, ended as u64);
                 let mut out = format!("closed {closed} sessions");
                 if hourly {
                     let rep = rollup::run(&mut db, a.zone, &s, now)?;
