@@ -85,6 +85,15 @@ impl Zoom {
         }
     }
 
+    /// The query parameter that gives this zoom back (empty for the day).
+    pub fn qs(&self) -> String {
+        match self {
+            Zoom::Day => String::new(),
+            Zoom::Last(x) => format!("zoom={x}m"),
+            Zoom::Span(a, b) => format!("span={a:.2}-{b:.2}"),
+        }
+    }
+
     fn key(&self) -> &'static str {
         match self {
             Zoom::Day => "day",
@@ -593,6 +602,10 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         ..Default::default()
     };
     let mut raws: Vec<Raw> = vec![];
+    // Clients mode, more than MAX_LANES: the lanes that are not drawn. Their
+    // freezes still count in the caption, the table view, the "No freezes"
+    // test and the navigator plot.
+    let mut rest: Vec<Raw> = vec![];
     match inp.mode {
         Mode::Clients => {
             let mut by_client: HashMap<i64, Vec<Ev>> = HashMap::new();
@@ -646,16 +659,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
             if raws.len() > MAX_LANES && !inp.all_lanes {
                 raws.retain(|l| !l.evs.is_empty() || !l.sess.is_empty());
                 if raws.len() > MAX_LANES {
-                    let rest = raws.split_off(MAX_LANES);
-                    let t: u64 = rest.iter().map(|l| l.sort_total).sum();
-                    let n: usize = rest.iter().map(|l| l.evs.len()).sum();
-                    out.more = format!(
-                        "+ {} more clients · {} · {}",
-                        rest.len(),
-                        dur(t),
-                        num(n as u64)
-                    );
-                    out.more_url = "/clients?lanes=all".into();
+                    rest = raws.split_off(MAX_LANES);
                 }
             }
         }
@@ -705,7 +709,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     let day = {
         let mut lo = 8.0 * 60.0;
         let mut hi = 18.0 * 60.0;
-        for l in &raws {
+        for l in raws.iter().chain(rest.iter()) {
             for e in &l.evs {
                 let m = tod(z, e.ts);
                 lo = f64::min(lo, m);
@@ -772,6 +776,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
     if inp.mode != Mode::Strip {
         let all: Vec<(f64, u64)> = raws
             .iter()
+            .chain(rest.iter())
             .flat_map(|l| l.evs.iter())
             .map(|e| (tod(z, e.ts), e.d))
             .collect();
@@ -797,6 +802,11 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
             .cloned()
             .collect();
         if zwin.is_some() {
+            r.evs.retain(|e| in_win(e, lo, hi));
+        }
+    }
+    if zwin.is_some() {
+        for r in &mut rest {
             r.evs.retain(|e| in_win(e, lo, hi));
         }
     }
@@ -844,7 +854,13 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
             let (a, b) = fit(mid - w / 2.0, mid + w / 2.0, ext);
             link(&format!("span={a:.2}-{b:.2}"))
         };
-        let on = key == k || (key == "span" && (span_min - w).abs() < w * 0.02);
+        // A range that follows now is pressed by its length without the
+        // look-ahead pad (as app.js does with `follow`).
+        let len = match inp.zoom {
+            Zoom::Last(x) => x,
+            _ => span_min,
+        };
+        let on = key == k || (key == "span" && (len - w).abs() < w * 0.02);
         out.zoom_links.push(ZLink {
             label: label.into(),
             href,
@@ -857,6 +873,24 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         on: zwin.is_none(),
     });
     out.zoom_reset = link("");
+    // "+ N more clients": the totals of the hidden lanes in the visible
+    // window; the link shows every lane of this page at the same range.
+    if !rest.is_empty() {
+        let n: usize = rest.iter().map(|l| l.evs.len()).sum();
+        let t: u64 = rest.iter().flat_map(|l| l.evs.iter()).map(|e| e.d).sum();
+        let zq = inp.zoom.qs();
+        let mut extra = "lanes=all".to_string();
+        if !zq.is_empty() {
+            extra = format!("{extra}&{zq}");
+        }
+        out.more = format!(
+            "+ {} more clients · {} · {}",
+            rest.len(),
+            if n == 0 { "—".to_string() } else { dur(t) },
+            num(n as u64)
+        );
+        out.more_url = link(&extra);
+    }
     out.zoom_label = format!(
         "{}–{} {}",
         hm(lo, span_min < 10.0),
@@ -872,7 +906,7 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         .max_by_key(|e| (e.d, std::cmp::Reverse(e.ts)))
         .map(|e| e.id);
     let newest = newest.map(|e| e.id);
-    let total_ev: usize = raws.iter().map(|l| l.evs.len()).sum();
+    let total_ev: usize = raws.iter().chain(rest.iter()).map(|l| l.evs.len()).sum();
     let per_lane = MAX_BLOCKS_LANE.min((MAX_BLOCKS / raws.len().max(1)).max(30));
     // Block width: to time scale, but never less than min_px (the glyph
     // width in the day view, 4 px at 1 h or less). app.js uses the same rule.
@@ -926,139 +960,153 @@ pub fn build(ctx: &Ctx, inp: Input) -> Lanes {
         if inp.mode == Mode::Clients && playhead {
             lane.future_x = out.now_x.clone();
         }
-        if raw.marg.len() <= per_lane * 3 {
-            for e in &raw.marg {
-                let m = tod(z, e.ts);
-                let share = if e.d > 0 {
-                    e.wait as f64 / e.d as f64
-                } else {
-                    0.0
-                };
-                let (w, sw, wc, swc) = widths(e.d, share);
-                let client = ctx.client_name(e.client);
-                let when = z.stamp_tz(e.ts, now);
-                let mut acct = acct_label(e);
-                if !e.user.is_empty() && e.user != e.acct {
-                    acct = format!("{acct} {}", e.user);
-                }
-                lane.blocks.push(Block {
-                    id: e.id,
-                    x_v: win.x(m),
-                    x: pcu(win.x(m)),
-                    m: format!("{m:.5}"),
-                    dm: format!("{:.6}", e.d as f64 / 60_000.0),
-                    w,
-                    sw,
-                    wc,
-                    swc,
-                    hit: Some(e.id) == longest,
-                    newest: Some(e.id) == newest,
-                    ongoing: open.contains(&e.id),
-                    pct: pct(share),
-                    aria: format!(
-                        "{when}, {client}, {}, {}, {}, {} server wait",
-                        e.layout,
-                        script_label(&e.script),
-                        dur1(e.d),
-                        pct(share)
-                    ),
-                    t: when,
-                    d: dur1(e.d),
-                    from: e.from.clone(),
-                    layout: e.layout.clone(),
-                    acct,
-                    script: script_label(&e.script),
-                    client,
-                    srv: dur1(e.wait),
-                    cli: dur1(e.d - e.wait),
-                    bin: String::new(),
-                });
+        // One block per freeze, or one per bin. The visible window bins at
+        // window/per_lane minutes, so zooming in always gets finer. The
+        // margin (the rest of the day window, there for pan and zoom out
+        // before the page fetches again) bins coarsely: at most about
+        // per_lane bins over the whole day window.
+        let one = |e: &Ev| -> Block {
+            let m = tod(z, e.ts);
+            let share = if e.d > 0 {
+                e.wait as f64 / e.d as f64
+            } else {
+                0.0
+            };
+            let (w, sw, wc, swc) = widths(e.d, share);
+            let client = ctx.client_name(e.client);
+            let when = z.stamp_tz(e.ts, now);
+            let mut acct = acct_label(e);
+            if !e.user.is_empty() && e.user != e.acct {
+                acct = format!("{acct} {}", e.user);
             }
-        } else {
-            // Bin the freezes: window/per_lane minutes, but not more than
-            // 3 × per_lane bins over the day window.
-            let step = (span_min / per_lane as f64).max((ext.1 - ext.0) / (per_lane * 3) as f64);
+            Block {
+                id: e.id,
+                x_v: win.x(m),
+                x: pcu(win.x(m)),
+                m: format!("{m:.5}"),
+                dm: format!("{:.6}", e.d as f64 / 60_000.0),
+                w,
+                sw,
+                wc,
+                swc,
+                hit: Some(e.id) == longest,
+                newest: Some(e.id) == newest,
+                ongoing: open.contains(&e.id),
+                pct: pct(share),
+                aria: format!(
+                    "{when}, {client}, {}, {}, {}, {} server wait",
+                    e.layout,
+                    script_label(&e.script),
+                    dur1(e.d),
+                    pct(share)
+                ),
+                t: when,
+                d: dur1(e.d),
+                from: e.from.clone(),
+                layout: e.layout.clone(),
+                acct,
+                script: script_label(&e.script),
+                client,
+                srv: dur1(e.wait),
+                cli: dur1(e.d - e.wait),
+                bin: String::new(),
+            }
+        };
+        // The freezes of one bin, m0 to m0 + step: drawn as the longest.
+        let binned = |v: &[&Ev], m0: f64, step: f64| -> Block {
+            if v.len() == 1 {
+                return one(v[0]);
+            }
+            let top = v.iter().max_by_key(|e| e.d).copied().unwrap();
+            let sum: u64 = v.iter().map(|e| e.d).sum();
+            let wsum: u64 = v.iter().map(|e| e.wait).sum();
+            let share = if sum > 0 {
+                wsum as f64 / sum as f64
+            } else {
+                0.0
+            };
+            let m1 = m0 + step;
+            let label = format!(
+                "{} freezes {}–{}",
+                v.len(),
+                hm(m0, step < 1.0),
+                hm(m1, step < 1.0)
+            );
+            let mt = tod(z, top.ts);
+            let (w, sw, wc, swc) = widths(top.d, share);
+            let client = ctx.client_name(top.client);
+            let when = z.stamp_tz(top.ts, now);
+            Block {
+                id: top.id,
+                x_v: win.x(mt),
+                x: pcu(win.x(mt)),
+                m: format!("{mt:.5}"),
+                dm: format!("{:.6}", top.d as f64 / 60_000.0),
+                w,
+                sw,
+                wc,
+                swc,
+                hit: v.iter().any(|e| Some(e.id) == longest),
+                newest: v.iter().any(|e| Some(e.id) == newest),
+                ongoing: v.iter().any(|e| open.contains(&e.id)),
+                pct: pct(share),
+                aria: format!(
+                    "{label} · longest {} at {when} · total {}",
+                    dur1(top.d),
+                    dur(sum)
+                ),
+                t: when,
+                d: dur1(top.d),
+                from: top.from.clone(),
+                layout: top.layout.clone(),
+                acct: acct_label(top),
+                script: script_label(&top.script),
+                client,
+                srv: dur1(wsum),
+                cli: dur1(sum - wsum),
+                bin: format!("{label} · total {}", dur(sum)),
+            }
+        };
+        // Bins of `step` minutes from `anchor` (keys below 0 are before it).
+        let bin = |v: &[&Ev], anchor: f64, step: f64| -> Vec<Block> {
             let mut bins: BTreeMap<i64, Vec<&Ev>> = BTreeMap::new();
-            for e in &raw.marg {
-                let k = ((tod(z, e.ts) - lo) / step).floor() as i64;
+            for e in v {
+                let k = ((tod(z, e.ts) - anchor) / step).floor() as i64;
                 bins.entry(k).or_default().push(e);
             }
-            for (k, v) in bins {
-                let top = v.iter().max_by_key(|e| e.d).copied().unwrap();
-                let sum: u64 = v.iter().map(|e| e.d).sum();
-                let wsum: u64 = v.iter().map(|e| e.wait).sum();
-                let share = if sum > 0 {
-                    wsum as f64 / sum as f64
-                } else {
-                    0.0
-                };
-                let m0 = lo + k as f64 * step;
-                let m1 = m0 + step;
-                let label = if v.len() == 1 {
-                    String::new()
-                } else {
-                    format!(
-                        "{} freezes {}–{}",
-                        v.len(),
-                        hm(m0, step < 1.0),
-                        hm(m1, step < 1.0)
-                    )
-                };
-                let mt = tod(z, top.ts);
-                let (w, sw, wc, swc) = widths(top.d, share);
-                let client = ctx.client_name(top.client);
-                let when = z.stamp_tz(top.ts, now);
-                lane.blocks.push(Block {
-                    id: top.id,
-                    x_v: win.x(mt),
-                    x: pcu(win.x(mt)),
-                    m: format!("{mt:.5}"),
-                    dm: format!("{:.6}", top.d as f64 / 60_000.0),
-                    w,
-                    sw,
-                    wc,
-                    swc,
-                    hit: v.iter().any(|e| Some(e.id) == longest),
-                    newest: v.iter().any(|e| Some(e.id) == newest),
-                    ongoing: v.iter().any(|e| open.contains(&e.id)),
-                    pct: pct(share),
-                    aria: if label.is_empty() {
-                        format!(
-                            "{when}, {client}, {}, {}, {}, {} server wait",
-                            top.layout,
-                            script_label(&top.script),
-                            dur1(top.d),
-                            pct(share)
-                        )
-                    } else {
-                        format!(
-                            "{label} · longest {} at {when} · total {}",
-                            dur1(top.d),
-                            dur(sum)
-                        )
-                    },
-                    t: when,
-                    d: dur1(top.d),
-                    from: top.from.clone(),
-                    layout: top.layout.clone(),
-                    acct: acct_label(top),
-                    script: script_label(&top.script),
-                    client,
-                    srv: dur1(wsum),
-                    cli: dur1(sum - wsum),
-                    bin: if label.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{label} · total {}", dur(sum))
-                    },
-                });
-            }
+            bins.iter()
+                .map(|(k, v)| binned(v, anchor + *k as f64 * step, step))
+                .collect()
+        };
+        let (vis, side): (Vec<&Ev>, Vec<&Ev>) = raw.marg.iter().partition(|e| in_win(e, lo, hi));
+        let (left, right): (Vec<&Ev>, Vec<&Ev>) = side.into_iter().partition(|e| tod(z, e.ts) < lo);
+        // The margin first: a few freezes each get a block; more are binned.
+        let side_n = left.len() + right.len();
+        if side_n <= per_lane {
+            lane.blocks.extend(left.iter().chain(right.iter()).map(|e| one(e)));
+        } else {
+            let step = (span_min / per_lane as f64).max((ext.1 - ext.0) / per_lane as f64);
+            lane.blocks.extend(bin(&left, lo, step));
+            lane.blocks.extend(bin(&right, hi, step));
         }
+        // The window: one block per freeze while they fit the budget (as in
+        // the day view before), else bins of window/per_lane minutes.
+        let budget = (per_lane * 3).saturating_sub(lane.blocks.len());
+        if vis.len() <= budget {
+            lane.blocks.extend(vis.iter().map(|e| one(e)));
+        } else {
+            lane.blocks.extend(bin(&vis, lo, span_min / per_lane as f64));
+        }
+        lane.blocks.sort_by(|a, b| a.x_v.total_cmp(&b.x_v).then(a.id.cmp(&b.id)));
         out.lanes.push(lane);
     }
 
     // Caption and table view.
-    let all_evs: Vec<&Ev> = raws.iter().flat_map(|l| l.evs.iter()).collect();
+    let all_evs: Vec<&Ev> = raws
+        .iter()
+        .chain(rest.iter())
+        .flat_map(|l| l.evs.iter())
+        .collect();
     out.empty = all_evs.is_empty();
     let top = all_evs
         .iter()
