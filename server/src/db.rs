@@ -140,6 +140,11 @@ const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX idx_events_freeze ON events(session_id, freeze_id) WHERE freeze_id > 0;
     CREATE INDEX idx_events_open ON events(open) WHERE open = 1;
     "#,
+    // 3: when the server last received a progress update of an open freeze
+    // (server clock). The stale time-out uses it, not the client's now_ts.
+    r#"
+    ALTER TABLE events ADD COLUMN seen_ms INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

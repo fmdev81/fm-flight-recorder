@@ -52,7 +52,11 @@ fn batch(events: Vec<Value>) -> Batch {
 }
 
 fn put(db: &mut Db, events: Vec<Value>) -> IngestReply {
-    let now = fr_server::tz::parse_ts(START).unwrap();
+    put_at(db, events, fr_server::tz::parse_ts(START).unwrap())
+}
+
+/// Store a batch that the server got at `now` (its clock).
+fn put_at(db: &mut Db, events: Vec<Value>, now: i64) -> IngestReply {
     let m = Meta {
         ip: "10.0.0.2",
         seen_ms: now,
@@ -140,6 +144,28 @@ fn a_silent_open_freeze_closes_after_the_stale_time() {
         1
     );
     assert_eq!(row(&db).1, 0);
+}
+
+#[test]
+fn the_stale_time_is_by_the_server_clock_not_the_client_clock() {
+    // The client's clock is 2 minutes slow: its now_ts (22:35:40) is 2 min
+    // before the server got the update.
+    let mut db = db::open_memory();
+    let client_now = fr_server::tz::parse_ts("2026-11-11T22:35:40.000Z").unwrap();
+    let got = client_now + 120_000;
+    put_at(&mut db, vec![progress(3, 4000, 4)], got);
+    assert_eq!(rollup::close_open_freezes(&db, got + 30_000).unwrap(), 0);
+    assert_eq!(row(&db).1, 1, "still open 30 s after the last update");
+    // The next update (server clock) moves the stale time on.
+    put_at(&mut db, vec![progress(4, 5000, 5)], got + 50_000);
+    assert_eq!(
+        rollup::close_open_freezes(&db, got + 50_000 + rollup::OPEN_STALE_MS - 1).unwrap(),
+        0
+    );
+    assert_eq!(
+        rollup::close_open_freezes(&db, got + 50_000 + rollup::OPEN_STALE_MS + 1).unwrap(),
+        1
+    );
 }
 
 #[test]

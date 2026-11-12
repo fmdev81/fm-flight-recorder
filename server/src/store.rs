@@ -357,7 +357,7 @@ pub fn store_batch(db: &mut Db, b: &Batch, m: Meta) -> Result<IngestReply, Store
         for r in &rows {
             // A long freeze: one row that grows, then the final replaces it.
             let open = match r.kind.as_str() {
-                "freeze_progress" => Some(if progress(&tx, &b.session_id, client_id, r)? {
+                "freeze_progress" => Some(if progress(&tx, &b.session_id, client_id, r, m.seen_ms)? {
                     Open::Done
                 } else {
                     Open::Duplicate
@@ -456,6 +456,7 @@ fn progress(
     session_id: &str,
     client_id: i64,
     r: &Row,
+    seen_ms: i64,
 ) -> Result<bool, StoreError> {
     let id = r.freeze_id as i64;
     let d = r.duration_ms as i64;
@@ -484,9 +485,9 @@ fn progress(
             tx.execute(
                 "INSERT INTO events(session_id, seq, client_id, type, ts_ms, end_ms, duration_ms,
                    level, file, layout, layout_table, from_layout, script, account, user,
-                   before_json, raw, freeze_id, open, parts)
+                   before_json, raw, freeze_id, open, parts, seen_ms)
                  VALUES (?1, ?2, ?3, 'freeze', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                   ?15, ?16, ?17, 1, ?18)",
+                   ?15, ?16, ?17, 1, ?18, ?19)",
                 params![
                     session_id,
                     -id,
@@ -509,6 +510,7 @@ fn progress(
                     r.raw,
                     id,
                     r.parts as i64,
+                    seen_ms,
                 ],
             )?;
             tx.execute(
@@ -520,9 +522,9 @@ fn progress(
         }
         Some((1, old)) if d > old => {
             tx.execute(
-                "UPDATE events SET duration_ms = ?3, end_ms = ?4, parts = ?5, raw = ?6
+                "UPDATE events SET duration_ms = ?3, end_ms = ?4, parts = ?5, raw = ?6, seen_ms = ?7
                  WHERE session_id = ?1 AND freeze_id = ?2",
-                params![session_id, id, d, r.end_ms, r.parts as i64, r.raw],
+                params![session_id, id, d, r.end_ms, r.parts as i64, r.raw, seen_ms],
             )?;
             tx.execute(
                 "UPDATE sessions SET frozen_ms = frozen_ms + ?2 WHERE session_id = ?1",
