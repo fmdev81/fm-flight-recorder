@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% import "macros.html" as m %}
+{% import "tk.html" as tk %}
 {% block top %}
 <nav aria-label="Breadcrumb" class="crumbs"><a href="/clients">Clients</a><span class="muted">/</span><span>{{ v.name }}</span></nav>
 <div class="title">
 <h1 class="h1">{{ v.name }}</h1>
 <div class="sub">
-{% if v.connected %}<span class="pill"><span class="dot dot-ok"></span>Connected</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Offline</span>{% endif %}
+{% if v.connected %}<span class="pill"><span class="dot dot-ok"></span>Online</span>{% else %}<span class="pill"><span class="dot dot-off"></span>Offline</span>{% endif %}
 {% if !v.ip.is_empty() %}<span class="mono">{{ v.ip }}</span>{% endif %}
 {% if !v.app.is_empty() %}<span>FileMaker {{ v.app }}</span>{% endif %}
 {% if !v.plugin.is_empty() %}<span>Plug-in {{ v.plugin }}</span>{% endif %}
@@ -18,9 +19,20 @@
 {% endblock %}
 {% block content %}
 {% if !v.found %}<div class="card"><div class="empty">No client</div></div>{% else %}
-{% call m::tiles(v.tiles, "g-tiles") %}
-
 {% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
+
+{% call tk::table(v.table) %}
+
+<div class="card"><div class="ch"><h2 class="ct" title="SRTT is the network round-trip time from this client to FileMaker Server, as macOS measures it on the connection. Values of 0 (no reading) are left out. A high SRTT in a slow hour points to the network; a low one points to the server or the client.">SRTT by hour</h2><span class="sub">median and p95, ms</span></div>
+{% if v.srtt.is_empty() %}<div class="empty">No SRTT readings</div>{% else %}
+<div class="tw"><table class="t srtt">
+<thead><tr><th>Hour</th><th class="w40">SRTT</th><th class="r">Median</th><th class="r">p95</th><th class="r">Freezes</th></tr></thead>
+<tbody>{% for h in v.srtt %}<tr title="{{ h.title }}"><td class="mono">{{ h.hour }}</td><td><div class="rb" role="img" aria-label="{{ h.title }}"><div class="r95" style="width: {{ h.w95 }}"></div><div class="r50" style="width: {{ h.w50 }}"></div></div></td><td class="r mono">{{ h.p50 }}</td><td class="r mono">{{ h.p95 }}</td><td class="r mono">{{ h.n }}</td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+</div>
+
+{% call m::metrics(v.tiles) %}
+
 
 <div class="card">
 <div class="ch"><h2 class="ct">Sessions</h2><span class="sub">7 days</span></div>
@@ -40,14 +52,6 @@
 {% for o in v.options %}<tr><td class="k">{{ o.0 }}</td><td class="mono">{{ o.1 }}</td></tr>{% endfor %}
 </tbody></table></div>{% endif %}
 </div>
-<div class="card"><div class="ch"><h2 class="ct">SRTT by hour</h2><span class="sub">median and p95, ms</span></div>
-<p class="sub cap">SRTT is the network round-trip time from this client to FileMaker Server, as macOS measures it on the connection. Values of 0 (no reading) are left out. A high SRTT in a slow hour points to the network; a low one points to the server or the client.</p>
-{% if v.srtt.is_empty() %}<div class="empty">No SRTT readings</div>{% else %}
-<div class="tw"><table class="t srtt">
-<thead><tr><th>Hour</th><th class="w40">SRTT</th><th class="r">Median</th><th class="r">p95</th><th class="r">Freezes</th></tr></thead>
-<tbody>{% for h in v.srtt %}<tr title="{{ h.title }}"><td class="mono">{{ h.hour }}</td><td><div class="rb" role="img" aria-label="{{ h.title }}"><div class="r95" style="width: {{ h.w95 }}"></div><div class="r50" style="width: {{ h.w50 }}"></div></div></td><td class="r mono">{{ h.p50 }}</td><td class="r mono">{{ h.p95 }}</td><td class="r mono">{{ h.n }}</td></tr>{% endfor %}</tbody>
-</table></div>{% endif %}
-</div>
 </div>
 
 <div class="grid g-2">
@@ -55,9 +59,5 @@
 <div class="card"><div class="ch"><h2 class="ct">Layouts</h2></div>{% call m::ntable(v.layouts, "Layout", false) %}</div>
 </div>
 
-<div class="card">
-<div class="ch"><h2 class="ct">Latest events</h2></div>
-{% call m::events(v.events, true, false) %}
-</div>
 {% endif %}
 {% endblock %}

@@ -10,7 +10,7 @@
 <a class="btn" href="{{ v.ctl.cmp_url() }}" aria-pressed="{{ v.ctl.cmp }}">Compare to last week</a>
 {% endblock %}
 {% block content %}
-{% call m::tiles(v.tiles, "g-tiles") %}
+{% call m::metrics(v.tiles) %}
 
 {% if let Some(lz) = v.lanes %}{% include "lanes.html" %}{% else %}{% call m::chart(v.chart_title, v.chart) %}{% endif %}
 

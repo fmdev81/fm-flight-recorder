@@ -35,6 +35,25 @@ pub fn close_offline_sessions(db: &Db, now: i64, connected_ms: i64) -> rusqlite:
     )
 }
 
+/// An open freeze with no update for this long is over (the plug-in sends
+/// one about each second while the freeze lasts).
+pub const OPEN_STALE_MS: i64 = 60_000;
+
+/// Close the open freezes (`freeze_progress` rows) whose session ended or
+/// that had no update for [`OPEN_STALE_MS`]. They keep their last duration.
+/// "No update" is by the server's clock (`seen_ms`, when the server got the
+/// last progress), so a client clock that is slow or fast does not close a
+/// freeze early or keep it open late. Rows from before `seen_ms` fall back
+/// to the client's time.
+pub fn close_open_freezes(db: &Db, now: i64) -> rusqlite::Result<usize> {
+    db.execute(
+        "UPDATE events SET open = 0
+         WHERE open = 1 AND (coalesce(nullif(seen_ms, 0), end_ms, ts_ms) < ?1
+           OR session_id IN (SELECT session_id FROM sessions WHERE closed <> ''))",
+        [now - OPEN_STALE_MS],
+    )
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct Report {
     pub days_rolled: usize,

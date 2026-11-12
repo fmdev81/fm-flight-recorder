@@ -1,6 +1,0 @@
-{% if v.recent.is_empty() %}<div class="empty">{% if v.ctl.range == "today" %}No freezes yet today. The recorder is on standby until a client opens a session.{% else %}No freezes in this range.{% endif %}</div>{% else %}
-<div class="tw fade"><table class="t ft">
-{% call m::fth(v.ctl.file.is_empty()) %}
-<tbody>
-{% for r in v.recent %}{% call m::ftr(r, v.ctl.file.is_empty()) %}{% endfor %}
-</tbody></table></div>{% endif %}

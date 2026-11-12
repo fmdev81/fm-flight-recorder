@@ -33,17 +33,15 @@
 <header class="top">
 {% block top %}{% endblock %}
 </header>
-<main class="main" id="main"><div class="wrap">
+<main class="main{% block mainclass %}{% endblock %}" id="main"><div class="wrap">
 {% block content %}{% endblock %}
 </div></main>
 <footer class="srv" id="srv" data-live>
-<div class="on"><span class="dot dot-ok"></span>Listening</div>
-<div class="mono xw">{{ shell.footer.listen }}</div>
-<div class="xw">{{ shell.footer.connected }} of {{ shell.footer.clients }} clients connected</div>
-<div class="xn mono">{{ shell.footer.connected }}/{{ shell.footer.clients }} connected</div>
-<div class="xw">Last event <span class="mono">{{ shell.footer.last_event }}</span></div>
-<div class="tzn" title="Every time on these pages is local time of the server time zone, {{ shell.footer.tz }} ({{ shell.footer.tz_offset }})">Times in <b>{{ shell.footer.tz_abbr }}</b><span class="xw"> · {{ shell.footer.tz }} · {{ shell.footer.tz_offset }}</span></div>
-<div class="xw">FM Flight Recorder server {{ shell.footer.server_version }} · Plug-in {{ shell.footer.plugin_version }}</div>
+{# One line. The listen address, the versions and the full time zone are
+   on the Setup page. #}
+<div class="on" title="Listening on {{ shell.footer.listen }}"><span class="dot dot-ok"></span><span class="ltx">Listening</span></div>
+<div>{{ shell.footer.connected }}/{{ shell.footer.clients }} connected</div>
+<div>Last event {{ shell.footer.last_event }} <span class="tzn" title="Every time on these pages is local time of the server time zone, {{ shell.footer.tz }} ({{ shell.footer.tz_offset }})">{{ shell.footer.tz_abbr }}</span></div>
 </footer>
 </div>
 </body>

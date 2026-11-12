@@ -146,6 +146,29 @@ FlightRecorder_Start ( "endpoint=http://192.168.1.10:8787; token=<event token>; 
 A plug-in before these options ignores them (the result shows `ignored: send_ms, ping_ms`) and
 uses the defaults.
 
+### Long freezes: one event that grows
+
+FileMaker can run the run loop for a moment in a long operation (about once a second in a long
+script step). The plug-in joins these parts into one freeze: a part that starts at most 50 ms
+after the end of the last part, with no real sleep between, is the same freeze.
+
+While a freeze lasts, the plug-in sends a `freeze_progress` event about once a second, after
+the first second:
+
+| Field | Meaning |
+|---|---|
+| `ts` | The start of the freeze. |
+| `now_ts` | The time of this update. |
+| `id` | The number of the freeze in the session: 1, 2, ... |
+| `duration_ms` | From `ts` to `now_ts`. |
+| `level`, `before` | As in `freeze`. |
+| `parts` | The parts joined so far. |
+
+When the freeze ends, the plug-in sends the usual `freeze` event. Its `ts` is the same text as
+the `ts` of the `freeze_progress` events of that freeze. A server that knows `freeze_progress`
+shows one open freeze that grows, and the final `freeze` replaces it. An older server keeps
+the `freeze_progress` events as unknown events, and stores the final `freeze` as before.
+
 ### Unknown fields and types
 
 - The server ignores fields that it does not know, in the envelope and in the events.

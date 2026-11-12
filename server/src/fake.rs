@@ -394,6 +394,7 @@ fn make_day(
     let ts_of = |e: &Event| match e {
         Event::SessionStart { ts, .. }
         | Event::Freeze { ts, .. }
+        | Event::FreezeProgress { ts, .. }
         | Event::ScriptBusy { ts, .. }
         | Event::Mark { ts, .. }
         | Event::SessionStop { ts, .. } => ts.clone(),
