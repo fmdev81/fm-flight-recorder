@@ -100,7 +100,7 @@ pub struct Config {
     /// after the first ends, with no real sleep between (`join_ms=`).
     pub join_ms: u64,
     /// Send a `freeze_progress` event this often while a freeze lasts
-    /// (`progress_ms=`). 0 = never.
+    /// (`progress_ms=`). 0 = never; otherwise 250 to [`PROGRESS_MS_MAX`].
     pub progress_ms: u64,
     /// Companion server (`endpoint=http://host:8787`). None = do not send.
     pub endpoint: Option<Endpoint>,
@@ -135,6 +135,11 @@ pub const EVENT_QUEUE_MAX: usize = 4096;
 /// 250 ms by default, so freezes cannot come faster than that anyway.
 pub const SEND_MS_MIN: u64 = 250;
 pub const SEND_MS_MAX: u64 = 60_000;
+/// The longest `progress_ms`. The server closes an open freeze that had no
+/// update for 60 s (`OPEN_STALE_MS`, by its own receive time), so updates
+/// must come well inside that, or a row could close between two updates
+/// and stop growing.
+pub const PROGRESS_MS_MAX: u64 = 30_000;
 /// Range of `ping_ms=`.
 pub const PING_MS_MIN: u64 = 5_000;
 pub const PING_MS_MAX: u64 = 600_000;
@@ -317,7 +322,7 @@ impl Config {
                     .is_ok(),
                 "progress_ms" => v
                     .parse::<u64>()
-                    .map(|n| self.progress_ms = if n == 0 { 0 } else { n.clamp(250, 60_000) })
+                    .map(|n| self.progress_ms = if n == 0 { 0 } else { n.clamp(250, PROGRESS_MS_MAX) })
                     .is_ok(),
                 "port" => v
                     .parse::<u16>()
@@ -1266,6 +1271,23 @@ mod tests {
         assert_eq!(c.threshold_ms, 20);
         c.apply_options("port=15003");
         assert_eq!(c.net_port, Some(15003));
+    }
+
+    #[test]
+    fn options_progress_ms_stays_inside_the_server_stale_time() {
+        let mut c = Config::default();
+        assert_eq!(c.progress_ms, 1000);
+        let r = c.apply_options("progress_ms=5000");
+        assert!(r.ignored.is_empty() && r.errors.is_empty(), "{r:?}");
+        assert_eq!(c.progress_ms, 5000);
+        // At most 30 s: the server closes a row after 60 s with no update.
+        c.apply_options("progress_ms=60000");
+        assert_eq!(c.progress_ms, PROGRESS_MS_MAX);
+        assert_eq!(PROGRESS_MS_MAX, 30_000);
+        c.apply_options("progress_ms=10");
+        assert_eq!(c.progress_ms, 250);
+        c.apply_options("progress_ms=0");
+        assert_eq!(c.progress_ms, 0, "0 turns progress updates off");
     }
 
     #[test]

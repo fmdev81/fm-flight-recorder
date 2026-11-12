@@ -153,7 +153,10 @@ script step). The plug-in joins these parts into one freeze: a part that starts 
 after the end of the last part, with no real sleep between, is the same freeze.
 
 While a freeze lasts, the plug-in sends a `freeze_progress` event about once a second, after
-the first second:
+the first second. The option `progress_ms=` changes the interval: 250 to 30000 ms, or 0 for
+no progress events. A larger value is set to 30000. A server closes an open freeze that has
+had no update for 60 s (the companion server times this by when it received the update), so
+the interval stays well inside that.
 
 | Field | Meaning |
 |---|---|
