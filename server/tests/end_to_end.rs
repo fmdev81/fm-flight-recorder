@@ -635,9 +635,16 @@ fn overview_is_calm() {
     }
     // Tiles: one number and at most one short line.
     let tiles = &page[page.find("id=\"ov-tiles\"").unwrap()..];
-    let tiles = &tiles[..tiles
-        .find("</div>\n</div></div>")
-        .unwrap_or(tiles.len().min(4000))];
+    // The tiles part ends where the timeline (or the chart) begins; both
+    // come before the Latest freezes card. A missing end is a failure, not
+    // a fallback length (that reached into the lane labels).
+    let end = ["<figure", "id=\"ov-latest\""]
+        .iter()
+        .filter_map(|m| tiles.find(m))
+        .min()
+        .expect("end of the tiles part");
+    let tiles = &tiles[..end];
+    assert!(tiles.contains("class=\"card tile\""), "the slice has the tiles");
     for gone in [
         "script busy",
         "per freeze",
