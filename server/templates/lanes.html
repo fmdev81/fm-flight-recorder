@@ -39,5 +39,6 @@
 <tbody>{% for r in lz.table %}<tr><td class="mono"><a class="lite" href="{{ r.url }}">{{ r.t }}</a></td><td>{{ r.client }}</td><td>{{ r.layout }}</td><td class="mono">{{ r.acct }}</td><td class="r mono">{{ r.d }}</td><td class="r mono">{{ r.pct }}</td></tr>{% endfor %}</tbody>
 </table></div>{% if lz.table_more %}<div class="sub muted">The newest {{ lz.table.len() }} freezes. All freezes has the rest.</div>{% endif %}
 </details>{% endif %}
+{% if !lz.all_url.is_empty() %}<a href="{{ lz.all_url }}">All freezes</a>{% endif %}
 </div>
 </figure>

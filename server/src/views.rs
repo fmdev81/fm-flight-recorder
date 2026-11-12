@@ -928,7 +928,8 @@ pub fn today_lanes(ctx: &Ctx, p: &Params) -> Lanes {
             sess: &sess,
             all_lanes: p.all_lanes,
             day_url: &|_| String::new(),
-            all_url: format!("/freezes?range=today{}", lanes::file_qs(&file)),
+            // The overview links to the freeze list in its Latest freezes card.
+            all_url: String::new(),
             live_qs: Some(qs),
             zoom: p.lanes_zoom(),
             keep_qs: p.qs_without_zoom(),
@@ -1068,7 +1069,8 @@ pub fn overview(ctx: &Ctx, p: &Params) -> Overview {
             &f,
             &sess,
             &|d| format!("{}{fq}", day_link("/", d)),
-            ctl.freezes_url(""),
+            // The Latest freezes card has the link.
+            String::new(),
         )
     };
     // The newest freezes first: the main panel of the overview. The worst
@@ -1331,12 +1333,8 @@ pub fn layout_detail(ctx: &Ctx, p: &Params) -> LayoutDetail {
                 &f,
                 &[],
                 &|d| day_link(&base, d),
-                format!(
-                    "/freezes?{}&file={}&layout={}",
-                    ctl.rq(),
-                    enc(&p.file),
-                    enc(&p.name)
-                ),
+                // The Latest freezes card has the link.
+                String::new(),
             )
         },
         chart_title: title.into(),

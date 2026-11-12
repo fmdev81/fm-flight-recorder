@@ -1016,3 +1016,47 @@ fn users_and_clients_are_tables_and_the_timeline_is_on_the_client_page() {
         assert!(detail.contains("<th>Metric</th>"));
     }
 }
+
+#[test]
+fn script_user_and_client_timelines_link_to_their_freezes() {
+    let (app, base, _d) = server("all-freezes");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    // The first row of each list opens a detail page; its timeline ends
+    // with "All freezes" filtered to that script, user or client.
+    for (list, key) in [
+        ("/scripts?range=7d", "&script="),
+        ("/users?range=7d", "&account="),
+        ("/clients?range=7d", "&client="),
+    ] {
+        let l = text(&get(&base, list).body);
+        let href = l
+            .split("data-href=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string();
+        let sep = if href.contains('?') { '&' } else { '?' };
+        let page = text(&get(&base, &format!("{href}{sep}range=7d")).body);
+        let fig = &page[page.find("<figure class=\"card lanes").expect(list)..];
+        let fig = &fig[..fig.find("</figure>").unwrap()];
+        let link = fig
+            .split("<a href=\"/freezes?")
+            .nth(1)
+            .unwrap_or_else(|| panic!("{list}: no All freezes link"))
+            .split('"')
+            .next()
+            .unwrap();
+        assert!(link.contains(key), "{list}: {link}");
+        assert!(fig.contains(">All freezes</a>"), "{list}");
+    }
+    // The overview has the link in its Latest freezes card, not twice.
+    let ov = get(&base, "/?range=7d").body;
+    let fig = &ov[ov.find("<figure class=\"card lanes").unwrap()..];
+    let fig = &fig[..fig.find("</figure>").unwrap()];
+    assert!(!fig.contains(">All freezes</a>"));
+}
