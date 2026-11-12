@@ -14,12 +14,15 @@ pub mod eventlog;
 pub mod fmxabi;
 pub mod http;
 pub mod identity;
+#[cfg(target_os = "macos")]
+pub mod machthread;
 pub mod net;
 pub mod recorder;
 #[cfg(target_os = "macos")]
 pub mod runloop;
 pub mod sender;
 pub mod spool;
+pub mod startopts;
 pub mod wire;
 
 #[cfg(feature = "fmx")]

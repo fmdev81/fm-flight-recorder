@@ -14,8 +14,9 @@ mod selftest;
 
 use crate::context::{self, Context, ContextSource, Field};
 use crate::fmxabi::*;
-use crate::recorder::{mono_ns, Config, Level, Recorder};
+use crate::recorder::{mono_ns, Level, Recorder};
 use crate::runloop::{self, RunLoopObserver};
+use crate::startopts::{self, Plan};
 use ffi::*;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,6 +25,8 @@ use std::sync::{Arc, Mutex};
 struct State {
     rec: Arc<Recorder>,
     observer: Option<RunLoopObserver>,
+    /// The normalized option text of this session (see startopts::plan).
+    options: String,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -150,14 +153,40 @@ fn capture_current() -> Option<Context> {
 
 /// Returns the log path (plus "ignored: …" for unknown options), or
 /// "error: …" when the options are bad. On error the running recorder is
-/// not touched.
+/// not touched. The same options as the running session keep it. A start
+/// with an endpoint saves its options for the next launch.
 fn start(options: &str) -> String {
-    let mut cfg = Config::default();
-    let report = cfg.apply_options(options);
-    if !report.errors.is_empty() {
-        return report.error_result();
-    }
     let mut st = STATE.lock().unwrap();
+    let running = st
+        .as_ref()
+        .filter(|s| s.rec.is_running())
+        .map(|s| s.options.as_str());
+    let (mut cfg, report, options, save) = match startopts::plan(options, running) {
+        Plan::Error(e) => return e,
+        Plan::Keep {
+            report,
+            options,
+            save,
+        } => {
+            let path = st.as_ref().map(|s| s.rec.log_path().display().to_string());
+            let mut out = report.start_result(&path.unwrap_or_default());
+            // A first save that failed is tried again on each keep, and its
+            // error shows again, so it is not lost.
+            if save {
+                let dir = crate::identity::default_state_dir();
+                if let Err(e) = startopts::ensure_saved(&dir, &options) {
+                    out.push_str(&format!("\nnot saved for the next launch: {e}"));
+                }
+            }
+            return out;
+        }
+        Plan::Start {
+            cfg,
+            report,
+            options,
+            save,
+        } => (*cfg, report, options, save),
+    };
     if let Some(old) = st.take() {
         drop(old.observer);
         old.rec.stop();
@@ -168,26 +197,57 @@ fn start(options: &str) -> String {
         cfg.clone(),
         crate::default_probe(cfg.net_port),
     ));
-    let r2 = rec.clone();
     // We are on the main thread (Init or an external function call).
+    // The watchdog checks that this thread really sleeps when the run loop
+    // says "waiting" (a stall can follow BeforeWaiting in the same pass).
+    rec.watch_current_thread();
+    let r2 = rec.clone();
     let observer = unsafe {
         RunLoopObserver::install(runloop::CFRunLoopGetMain(), move |a| runloop::feed(&r2, a))
     };
     let path = rec.log_path().display().to_string();
-    *st = Some(State { rec, observer });
-    report.start_result(&path)
+    *st = Some(State {
+        rec,
+        observer,
+        options: options.clone(),
+    });
+    let mut out = report.start_result(&path);
+    if save {
+        if let Err(e) = startopts::save(&cfg.state_dir, &options) {
+            out.push_str(&format!("\nnot saved for the next launch: {e}"));
+        }
+    }
+    out
 }
 
-fn stop() -> String {
-    let Some(old) = STATE.lock().unwrap().take() else {
-        return "not running".into();
+/// `FlightRecorder_Stop( { "forget" } )`. With "forget", also delete the
+/// saved options, so the next launch records but does not send.
+fn stop(arg: &str) -> String {
+    let forget = match arg.trim().to_ascii_lowercase().as_str() {
+        "" => false,
+        "forget" => true,
+        other => return format!("error: unknown argument '{other}', use \"forget\""),
     };
-    drop(old.observer);
-    let s = old.rec.stop();
-    format!(
-        "stopped: {} freezes, {} heartbeats, log {}",
-        s.freezes, s.heartbeats, s.log
-    )
+    let mut out = match STATE.lock().unwrap().take() {
+        None => "not running".to_string(),
+        Some(old) => {
+            drop(old.observer);
+            let s = old.rec.stop();
+            format!(
+                "stopped: {} freezes, {} heartbeats, log {}",
+                s.freezes, s.heartbeats, s.log
+            )
+        }
+    };
+    if forget {
+        let dir = crate::identity::default_state_dir();
+        out.push_str(&match startopts::clear(&dir) {
+            Ok(true) => "\nsaved options deleted".to_string(),
+            Ok(false) => "\nno saved options".to_string(),
+            Err(e) => format!("\nsaved options not deleted: {e}"),
+        });
+    }
+    out
 }
 
 fn recorder() -> Option<Arc<Recorder>> {
@@ -206,7 +266,7 @@ unsafe extern "C" fn ext_function(
         let out = match id {
             1 => crate::VERSION.to_string(),
             2 => start(&param_text(parms, 0).unwrap_or_default()),
-            3 => stop(),
+            3 => stop(&param_text(parms, 0).unwrap_or_default()),
             4 => {
                 let label = param_text(parms, 0).unwrap_or_default();
                 match recorder() {
@@ -316,18 +376,22 @@ pub unsafe extern "C" fn FMExternCallProc(pb: *mut ExternCallStruct) {
                     p.result = K_DO_NOT_ENABLE as u64;
                     return;
                 }
-                // Record from launch with default options.
+                // Record from launch: with the options of the last start
+                // that had an endpoint, else with the default options.
                 if std::env::var_os("FLIGHT_RECORDER_NO_AUTOSTART").is_none() {
-                    start("");
+                    start(&startopts::init_options(
+                        &crate::identity::default_state_dir(),
+                    ));
                     if let Some(r) = recorder() {
                         r.mark(
                             &format!(
-                                "init: extnVersion {} app type {} app '{}' cCurrentEnv {} selftest {}",
+                                "init: extnVersion {} app type {} app '{}' cCurrentEnv {} selftest {} saved options {}",
                                 { p.extn_version },
                                 p.parm1,
                                 APP_VERSION.lock().unwrap(),
                                 CURRENT_ENV.load(Ordering::Relaxed) != 0,
-                                selftest::enabled()
+                                selftest::enabled(),
+                                r.config().endpoint.is_some()
                             ),
                             Context::default(),
                         );
@@ -337,7 +401,7 @@ pub unsafe extern "C" fn FMExternCallProc(pb: *mut ExternCallStruct) {
             }
             K_IDLE => on_idle(p),
             K_SHUTDOWN => {
-                stop();
+                stop("");
                 unregister_all();
             }
             K_GET_STRING => {

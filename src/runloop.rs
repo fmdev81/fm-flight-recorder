@@ -6,8 +6,17 @@
 //! (kCFRunLoopAfterWaiting) and has not come back to the run loop for
 //! `threshold` is frozen. Hang detectors on macOS and iOS use this method.
 //!
-//! The observer is added in kCFRunLoopCommonModes, so it also runs during
-//! modal dialogs and menu tracking.
+//! The observers are added in kCFRunLoopCommonModes, so they also run
+//! during modal dialogs and menu tracking.
+//!
+//! Two observers, because of the order inside one observer pass:
+//! * early (order `isize::MIN`, all activities except BeforeWaiting): the
+//!   beats, and AfterWaiting (the thread woke up) as early as possible.
+//! * late (order `isize::MAX`, BeforeWaiting only): "about to sleep". Other
+//!   observers of the BeforeWaiting pass can run for a long time. FileMaker
+//!   redraws there (NSPostWhenIdle -> DispatchNullEvent) and evaluates
+//!   button calcs. If we said "waiting" first, the detector would ignore
+//!   such a stall. As the last observer, we say it just before the sleep.
 
 use std::ffi::c_void;
 
@@ -75,10 +84,12 @@ extern "C" fn observer_cb(_o: CFRunLoopObserverRef, activity: u64, info: *mut c_
     h(activity);
 }
 
-/// Owns an observer. Dropping it removes the observer. Drop it on the
-/// thread that owns the run loop (FileMaker: the main thread, at shutdown).
+/// Owns the two observers (early and late, see the module docs). Dropping
+/// it removes them. Drop it on the thread that owns the run loop
+/// (FileMaker: the main thread, at shutdown).
 pub struct RunLoopObserver {
-    obs: CFRunLoopObserverRef,
+    early: CFRunLoopObserverRef,
+    late: CFRunLoopObserverRef,
     handler: *mut Handler,
 }
 
@@ -88,6 +99,8 @@ unsafe impl Sync for RunLoopObserver {}
 
 impl RunLoopObserver {
     /// Install `handler(activity)` on `rl` (use `CFRunLoopGetMain()`).
+    /// The handler gets BeforeWaiting from the late observer and all other
+    /// activities from the early one.
     ///
     /// # Safety
     /// `rl` must be a valid CFRunLoopRef.
@@ -104,21 +117,39 @@ impl RunLoopObserver {
             copy_description: std::ptr::null(),
         };
         unsafe {
-            // order = isize::MIN so BeforeWaiting reaches us early.
-            let obs = CFRunLoopObserverCreate(
+            // The context is copied at create, so one ctx serves both.
+            let early = CFRunLoopObserverCreate(
                 std::ptr::null(),
-                ALL,
+                ALL & !BEFORE_WAITING,
                 1,
                 isize::MIN,
                 observer_cb,
                 &mut ctx,
             );
-            if obs.is_null() {
+            let late = CFRunLoopObserverCreate(
+                std::ptr::null(),
+                BEFORE_WAITING,
+                1,
+                isize::MAX,
+                observer_cb,
+                &mut ctx,
+            );
+            if early.is_null() || late.is_null() {
+                for o in [early, late] {
+                    if !o.is_null() {
+                        CFRelease(o);
+                    }
+                }
                 drop(Box::from_raw(handler));
                 return None;
             }
-            CFRunLoopAddObserver(rl, obs, kCFRunLoopCommonModes);
-            Some(Self { obs, handler })
+            CFRunLoopAddObserver(rl, early, kCFRunLoopCommonModes);
+            CFRunLoopAddObserver(rl, late, kCFRunLoopCommonModes);
+            Some(Self {
+                early,
+                late,
+                handler,
+            })
         }
     }
 }
@@ -126,8 +157,10 @@ impl RunLoopObserver {
 impl Drop for RunLoopObserver {
     fn drop(&mut self) {
         unsafe {
-            CFRunLoopObserverInvalidate(self.obs);
-            CFRelease(self.obs);
+            for o in [self.early, self.late] {
+                CFRunLoopObserverInvalidate(o);
+                CFRelease(o);
+            }
             drop(Box::from_raw(self.handler));
         }
     }
@@ -136,7 +169,12 @@ impl Drop for RunLoopObserver {
 /// Map a run-loop activity onto the recorder.
 pub fn feed(rec: &crate::recorder::Recorder, activity: u64) {
     match activity {
-        BEFORE_WAITING => rec.set_waiting(true),
+        BEFORE_WAITING => {
+            // The late observer: the pass is done, the thread sleeps next.
+            // The beat marks the end of any work in this pass.
+            rec.beat(crate::recorder::Level::RunLoop);
+            rec.set_waiting(true);
+        }
         AFTER_WAITING => rec.set_waiting(false),
         _ => rec.beat(crate::recorder::Level::RunLoop),
     }
@@ -238,5 +276,104 @@ mod tests {
         assert!(seen[0].load(Ordering::Relaxed) >= 3, "before_waiting");
         assert!(seen[1].load(Ordering::Relaxed) >= 3, "after_waiting");
         assert!(seen[2].load(Ordering::Relaxed) >= 1, "other activities");
+    }
+    /// An observer of the BeforeWaiting pass (order 0, like Foundation's
+    /// notification queue) that uses the CPU for `ms` one time, when armed.
+    struct Hog {
+        obs: CFRunLoopObserverRef,
+        armed: *mut AtomicU64,
+    }
+    extern "C" fn hog_cb(_o: CFRunLoopObserverRef, _a: u64, info: *mut c_void) {
+        let armed = unsafe { &*(info as *const AtomicU64) };
+        let ms = armed.swap(0, Ordering::SeqCst);
+        if ms > 0 {
+            let t = std::time::Instant::now();
+            while t.elapsed() < std::time::Duration::from_millis(ms) {
+                std::hint::spin_loop();
+            }
+        }
+    }
+    impl Hog {
+        fn install() -> Hog {
+            let armed = Box::into_raw(Box::new(AtomicU64::new(0)));
+            let mut ctx = ObserverContext {
+                version: 0,
+                info: armed.cast(),
+                retain: std::ptr::null(),
+                release: std::ptr::null(),
+                copy_description: std::ptr::null(),
+            };
+            unsafe {
+                let obs = CFRunLoopObserverCreate(
+                    std::ptr::null(),
+                    BEFORE_WAITING,
+                    1,
+                    0,
+                    hog_cb,
+                    &mut ctx,
+                );
+                assert!(!obs.is_null());
+                CFRunLoopAddObserver(CFRunLoopGetCurrent(), obs, kCFRunLoopCommonModes);
+                Hog { obs, armed }
+            }
+        }
+        fn arm(&self, ms: u64) {
+            unsafe { &*self.armed }.store(ms, Ordering::SeqCst);
+        }
+    }
+    impl Drop for Hog {
+        fn drop(&mut self) {
+            unsafe {
+                CFRunLoopObserverInvalidate(self.obs);
+                CFRelease(self.obs);
+                drop(Box::from_raw(self.armed));
+            }
+        }
+    }
+
+    fn recorder(name: &str) -> (crate::recorder::Recorder, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "fr-runloop-{name}-{}-{}",
+            std::process::id(),
+            crate::identity::random_id()
+        ));
+        let cfg = crate::recorder::Config {
+            log_dir: dir.clone(),
+            state_dir: dir.join("state"),
+            net_port: None,
+            ..Default::default()
+        };
+        (
+            crate::recorder::Recorder::start(cfg, Box::new(crate::net::NoProbe)),
+            dir,
+        )
+    }
+
+    /// Stall in the BeforeWaiting pass, after another observer (the live
+    /// hang of 2026-11-11: NSPostWhenIdle -> DispatchNullEvent -> button
+    /// calc). Only the observer order is under test: no thread watch.
+    #[test]
+    fn stall_in_the_before_waiting_pass_is_a_freeze() {
+        let (rec, dir) = recorder("bw-pass");
+        let rec = std::sync::Arc::new(rec);
+        let r2 = rec.clone();
+        let obs = unsafe { RunLoopObserver::install(CFRunLoopGetCurrent(), move |a| feed(&r2, a)) }
+            .expect("observer");
+        let hog = std::rc::Rc::new(Hog::install());
+        let h2 = hog.clone();
+        let mut n = 0;
+        let _t = Timer::every(0.05, move || {
+            n += 1;
+            if n == 4 {
+                h2.arm(800);
+            }
+        });
+        run_for(1.5);
+        drop(obs);
+        drop(_t);
+        drop(hog);
+        let st = rec.stop();
+        assert_eq!(st.freezes, 1, "{st:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

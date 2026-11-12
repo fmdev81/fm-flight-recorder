@@ -102,6 +102,7 @@ fn main() {
         cfg,
         fm_flight_recorder::default_probe(Some(port)),
     ));
+    rec.watch_current_thread();
     let r2 = rec.clone();
     let _obs = unsafe {
         RunLoopObserver::install(runloop::CFRunLoopGetCurrent(), move |a| {
