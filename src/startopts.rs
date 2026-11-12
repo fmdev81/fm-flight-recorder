@@ -81,6 +81,16 @@ pub fn load(dir: &Path) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// Save `text` unless the file already holds it. Ok(true) if it wrote the
+/// file. A start that keeps the running session calls this, so a save that
+/// failed the first time is tried again (and its error shown again).
+pub fn ensure_saved(dir: &Path, text: &str) -> io::Result<bool> {
+    if load(dir).as_deref() == Some(normalize(text).as_str()) {
+        return Ok(false);
+    }
+    save(dir, text).map(|_| true)
+}
+
 /// Delete the saved options. Ok(true) if a file was there.
 pub fn clear(dir: &Path) -> io::Result<bool> {
     if dir.as_os_str().is_empty() {
@@ -107,8 +117,14 @@ pub fn init_options(dir: &Path) -> String {
 pub enum Plan {
     /// Bad options: return this text, do not touch the running recorder.
     Error(String),
-    /// Same options as the running session: keep it.
-    Keep(OptionReport),
+    /// Same options as the running session: keep it. `options` is the
+    /// normalized text; `save` is true when it has an endpoint (then the
+    /// file is checked, and written again if it is missing or differs).
+    Keep {
+        report: OptionReport,
+        options: String,
+        save: bool,
+    },
     /// Stop the running recorder (if any) and start with `cfg`. `options`
     /// is the normalized text; `save` is true when it has an endpoint.
     Start {
@@ -128,10 +144,14 @@ pub fn plan(options: &str, running: Option<&str>) -> Plan {
         return Plan::Error(report.error_result());
     }
     let options = normalize(options);
-    if running == Some(options.as_str()) {
-        return Plan::Keep(report);
-    }
     let save = cfg.endpoint.is_some();
+    if running == Some(options.as_str()) {
+        return Plan::Keep {
+            report,
+            options,
+            save,
+        };
+    }
     Plan::Start {
         cfg: Box::new(cfg),
         report,
@@ -270,9 +290,33 @@ mod tests {
         // Same text, other spaces and separators: keep.
         let running = normalize(OPTS);
         let again = "endpoint=http://127.0.0.1:8787;token=abc;scripts=1;send_ms=250;";
-        assert!(matches!(plan(again, Some(&running)), Plan::Keep(_)));
-        // No options while no-options runs: keep too.
-        assert!(matches!(plan("", Some("")), Plan::Keep(_)));
+        let Plan::Keep { options, save, .. } = plan(again, Some(&running)) else {
+            panic!("keep expected")
+        };
+        assert_eq!(options, running);
+        assert!(save, "an endpoint: the file is checked");
+        // No options while no-options runs: keep too, nothing to save.
+        assert!(matches!(plan("", Some("")), Plan::Keep { save: false, .. }));
+    }
+
+    #[test]
+    fn ensure_saved_writes_a_missing_or_different_file_only() {
+        let d = tmp("ensure");
+        // The first save failed (no file): a keep writes it.
+        assert!(ensure_saved(&d, OPTS).unwrap());
+        assert_eq!(load(&d).as_deref(), Some(normalize(OPTS).as_str()));
+        // Same text (other separators): no write.
+        let t0 = fs::metadata(path(&d)).unwrap().modified().unwrap();
+        assert!(!ensure_saved(&d, &OPTS.replace("; ", ";")).unwrap());
+        assert_eq!(fs::metadata(path(&d)).unwrap().modified().unwrap(), t0);
+        // The file differs (another start wrote it, or it was edited): write.
+        save(&d, "endpoint=http://other:8787; token=x").unwrap();
+        assert!(ensure_saved(&d, OPTS).unwrap());
+        assert_eq!(load(&d).as_deref(), Some(normalize(OPTS).as_str()));
+        // A folder that cannot be written: the error comes back every time.
+        assert!(ensure_saved(&PathBuf::new(), OPTS).is_err());
+        assert!(ensure_saved(&PathBuf::new(), OPTS).is_err());
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

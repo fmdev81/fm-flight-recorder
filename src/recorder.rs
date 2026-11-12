@@ -322,7 +322,13 @@ impl Config {
                     .is_ok(),
                 "progress_ms" => v
                     .parse::<u64>()
-                    .map(|n| self.progress_ms = if n == 0 { 0 } else { n.clamp(250, PROGRESS_MS_MAX) })
+                    .map(|n| {
+                        self.progress_ms = if n == 0 {
+                            0
+                        } else {
+                            n.clamp(250, PROGRESS_MS_MAX)
+                        }
+                    })
                     .is_ok(),
                 "port" => v
                     .parse::<u16>()

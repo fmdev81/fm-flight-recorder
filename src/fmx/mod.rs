@@ -163,9 +163,22 @@ fn start(options: &str) -> String {
         .map(|s| s.options.as_str());
     let (mut cfg, report, options, save) = match startopts::plan(options, running) {
         Plan::Error(e) => return e,
-        Plan::Keep(report) => {
+        Plan::Keep {
+            report,
+            options,
+            save,
+        } => {
             let path = st.as_ref().map(|s| s.rec.log_path().display().to_string());
-            return report.start_result(&path.unwrap_or_default());
+            let mut out = report.start_result(&path.unwrap_or_default());
+            // A first save that failed is tried again on each keep, and its
+            // error shows again, so it is not lost.
+            if save {
+                let dir = crate::identity::default_state_dir();
+                if let Err(e) = startopts::ensure_saved(&dir, &options) {
+                    out.push_str(&format!("\nnot saved for the next launch: {e}"));
+                }
+            }
+            return out;
         }
         Plan::Start {
             cfg,
