@@ -812,12 +812,11 @@ fn client_srtt_shows_median_and_p95_per_clock_hour() {
 }
 
 /// The first-column `data-v` of each body row of the table kit, in page order.
+/// The first cell of each row in view (rows the filter hides are left out).
 fn first_cells(body: &str) -> Vec<String> {
-    let tbody = &body[body.find("<tbody").unwrap()..];
-    let tbody = &tbody[..tbody.find("</tbody>").unwrap()];
-    tbody
-        .split("<tr")
-        .skip(1)
+    all_rows(body)
+        .into_iter()
+        .filter(|r| !r[..r.find('>').unwrap()].ends_with(" hidden"))
         .map(|r| {
             r.split("data-v=\"")
                 .nth(1)
@@ -828,6 +827,13 @@ fn first_cells(body: &str) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+/// Every row of the first table body, hidden or not.
+fn all_rows(body: &str) -> Vec<&str> {
+    let tbody = &body[body.find("<tbody").unwrap()..];
+    let tbody = &tbody[..tbody.find("</tbody>").unwrap()];
+    tbody.split("<tr").skip(1).collect()
 }
 
 #[test]
@@ -877,6 +883,12 @@ fn table_pages_keep_sort_and_filter_in_the_url_and_read_without_js() {
     let none = get(&base, "/scripts?range=7d&q=zzzzqqq").body;
     assert!(none.contains("0 of ") && none.contains("match"));
     assert!(first_cells(&none).is_empty());
+    // The rows the filter hides stay in the page (hidden), so JS can show
+    // them again when the filter is cleared; the empty line shows.
+    assert_eq!(all_rows(&none).len(), n_all);
+    assert!(none.contains("<p class=\"tkempty empty\" data-tkempty>"));
+    assert_eq!(all_rows(&f).len(), n_all);
+    assert!(def.contains("<p class=\"tkempty empty\" hidden data-tkempty>"));
 
     // An unknown sort column falls back to the default order.
     let bad = get(&base, "/scripts?range=7d&sort=nope&dir=asc").body;

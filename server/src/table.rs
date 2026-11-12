@@ -196,6 +196,9 @@ pub struct Row {
     pub id: String,
     /// A freeze that still lasts: the row pulses.
     pub ongoing: bool,
+    /// The filter hides the row. It stays in the page so that JS can show
+    /// it again when the filter gets shorter or is cleared.
+    pub hidden: bool,
 }
 
 impl Row {
@@ -312,7 +315,7 @@ impl Table {
             .collect();
         self.total = self.rows.len();
         if !self.server {
-            self.filter();
+            self.hide();
             self.order();
         }
         self.links();
@@ -339,17 +342,37 @@ impl Table {
         }
     }
 
-    pub fn filter(&mut self) {
-        let terms: Vec<String> = self
-            .q
+    fn terms(&self) -> Vec<String> {
+        self.q
             .to_lowercase()
             .split_whitespace()
             .map(String::from)
-            .collect();
+            .collect()
+    }
+
+    /// Remove the rows that do not match the filter (a `server` table: the
+    /// server answers again when the filter changes).
+    pub fn filter(&mut self) {
+        let terms = self.terms();
         if !terms.is_empty() {
             self.rows
                 .retain(|r| terms.iter().all(|t| r.search.contains(t.as_str())));
         }
+    }
+
+    /// Mark the rows that do not match the filter as hidden. They stay in
+    /// the page: JS filters the rows in the page, so a row the server left
+    /// out could not come back when the filter is cleared.
+    pub fn hide(&mut self) {
+        let terms = self.terms();
+        for r in &mut self.rows {
+            r.hidden = !terms.iter().all(|t| r.search.contains(t.as_str()));
+        }
+    }
+
+    /// The rows that the filter does not hide.
+    pub fn visible(&self) -> usize {
+        self.rows.iter().filter(|r| !r.hidden).count()
     }
 
     pub fn order(&mut self) {
@@ -399,7 +422,7 @@ impl Table {
 
     /// "42 scripts", or "3 of 42 scripts" while the filter hides rows.
     pub fn count_text(&self) -> String {
-        let n = self.shown.unwrap_or(self.rows.len());
+        let n = self.shown.unwrap_or_else(|| self.visible());
         let all = self.grand.unwrap_or(self.total);
         let noun = |n: usize| if n == 1 { &self.one } else { &self.many };
         if all == n {
@@ -490,8 +513,13 @@ mod tests {
         t
     }
 
+    /// The rows in view (not hidden by the filter), in order.
     fn names(t: &Table) -> Vec<String> {
-        t.rows.iter().map(|r| r.cells[0].text.clone()).collect()
+        t.rows
+            .iter()
+            .filter(|r| !r.hidden)
+            .map(|r| r.cells[0].text.clone())
+            .collect()
     }
 
     #[test]
@@ -538,8 +566,21 @@ mod tests {
         let t = table().apply("/scripts", &params(&[("q", "a 9")]));
         assert_eq!(names(&t), ["alpha"]);
         let t = table().apply("/scripts", &params(&[("q", "zzz")]));
-        assert!(t.rows.is_empty());
+        assert_eq!(t.visible(), 0);
         assert_eq!(t.empty_text(), "No scripts match “zzz”");
+    }
+
+    #[test]
+    fn the_filter_hides_rows_but_keeps_them_in_the_page() {
+        // JS filters the rows in the page; a row the server dropped could
+        // not come back when the filter is cleared.
+        let t = table().apply("/scripts", &params(&[("q", "eta")]));
+        assert_eq!(t.rows.len(), 4);
+        assert_eq!(names(&t), ["Beta"]);
+        assert_eq!(t.count_text(), "1 of 4 scripts");
+        // Still sorted as a whole, hidden rows too.
+        let all: Vec<_> = t.rows.iter().map(|r| r.cells[0].text.as_str()).collect();
+        assert_eq!(all, ["alpha", "Beta", "Gamma", "delta"]);
     }
 
     #[test]
