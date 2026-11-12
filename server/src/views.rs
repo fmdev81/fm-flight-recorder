@@ -2732,7 +2732,7 @@ pub fn freezes(ctx: &Ctx, p: &Params) -> Freezes {
     } else {
         "No freezes in this range.".into()
     };
-    let custom = !table.q.is_empty() || !(table.sort == "time" && table.dir == "desc");
+    let custom = !table.q.is_empty() || table.sort != "time" || table.dir != "desc";
     let (rows, total) = freeze_rows(
         ctx,
         &ctl,
