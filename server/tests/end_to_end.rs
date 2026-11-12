@@ -1060,3 +1060,33 @@ fn script_user_and_client_timelines_link_to_their_freezes() {
     let fig = &fig[..fig.find("</figure>").unwrap()];
     assert!(!fig.contains(">All freezes</a>"));
 }
+
+#[test]
+fn the_overview_flag_bar_shows_when_a_flag_fires() {
+    let (app, base, _d) = server("flagbar");
+    let mut o = opts();
+    o.end_ms = fr_server::tz::now_ms();
+    let sessions = fake::generate(&o, app.zone);
+    fake::post(&sessions, &base, &app.token(), o.end_ms).unwrap();
+    // Low thresholds: every layout's p95 is over 0.1 s and every plug-in is
+    // older than 99.0.0.
+    let form = "flag_p95_s=0.1&flag_quiet_min=45&flag_plugin_min=99.0.0&rec_threshold_ms=300&rec_port=443&event_days=14&total_days=365";
+    let r = request(
+        &base,
+        "POST",
+        "/setup",
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        form.as_bytes(),
+    );
+    assert_eq!(r.status, 303);
+    let page = get(&base, "/?range=7d").body;
+    let bar = &page[page
+        .find("<div class=\"card flagbar\" id=\"ov-flags\" data-live>")
+        .expect("the flag bar")..];
+    let bar = &bar[..bar.find("</div>").unwrap()];
+    assert!(bar.contains("<h2 class=\"ct\">Flags</h2><span class=\"flag\">"));
+    assert!(bar.contains("<span class=\"fgrp\" title=\""), "{bar}");
+    assert!(bar.contains("<span class=\"flag\">plug-in "), "{bar}");
+    assert!(bar.contains("<a class=\"thr\" href=\"/setup#s-flags\">Thresholds</a>"));
+    assert!(!page.contains("<div id=\"ov-flags\" data-live hidden></div>"));
+}
